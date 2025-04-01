@@ -703,31 +703,31 @@ app.post('/transfers/external', authenticate, [
     let debitAmount = amount;
     if (sourceAccount.currency !== currency) {
       try {
-        // First convert to EUR if source is not EUR
+        // Convert source amount to EUR first
         let amountInEUR = amount;
-        if (currency !== 'EUR') {
+        if (currency === 'EUR') {
+          amountInEUR = amount; // Already in EUR
+        } else {
           if (!exchangeRates[currency] || !exchangeRates[currency]['EUR']) {
             return res.status(400).json({
               status: 'error',
               message: `Unsupported currency conversion from ${currency} to EUR`
             });
           }
-          const rateToEUR = exchangeRates[currency]['EUR'];
-          amountInEUR = amount * rateToEUR;
+          amountInEUR = amount * exchangeRates[currency]['EUR'];
         }
-        
-        // Then convert from EUR to source account currency if needed
-        if (sourceAccount.currency !== 'EUR') {
+
+        // Then convert EUR to source account currency
+        if (sourceAccount.currency === 'EUR') {
+          debitAmount = amountInEUR; // Keep in EUR
+        } else {
           if (!exchangeRates['EUR'] || !exchangeRates['EUR'][sourceAccount.currency]) {
             return res.status(400).json({
               status: 'error',
               message: `Unsupported currency conversion from EUR to ${sourceAccount.currency}`
             });
           }
-          const rateFromEUR = exchangeRates['EUR'][sourceAccount.currency];
-          debitAmount = amountInEUR * rateFromEUR;
-        } else {
-          debitAmount = amountInEUR;
+          debitAmount = amountInEUR * exchangeRates['EUR'][sourceAccount.currency];
         }
       } catch (conversionError) {
         console.error('Currency conversion error:', conversionError);
