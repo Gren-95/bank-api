@@ -50,7 +50,7 @@ const dataStoreHelpers = {
     const account = {
       id: dataStore.nextAccountId++,
       ...accountData,
-      balance: 0,
+      balance: 1000,
       is_active: true,
       created_at: new Date().toISOString()
     };
@@ -66,8 +66,8 @@ const dataStoreHelpers = {
     return dataStore.accounts.filter(account => account.user_id === userId);
   },
 
-  updateAccountBalance: (accountId, amount) => {
-    const account = dataStore.accounts.find(acc => acc.id === accountId);
+  updateAccountBalance: (accountNumber, amount) => {
+    const account = dataStore.accounts.find(acc => acc.account_number === accountNumber);
     if (account) {
       account.balance += amount;
       return true;
@@ -87,9 +87,12 @@ const dataStoreHelpers = {
     return transaction;
   },
 
-  findAccountTransactions: (accountId) => {
+  findAccountTransactions: (accountNumber) => {
     return dataStore.transactions
-      .filter(transaction => transaction.account_id === accountId)
+      .filter(transaction => 
+        transaction.from_account === accountNumber || 
+        transaction.to_account === accountNumber
+      )
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   },
 
@@ -439,11 +442,11 @@ app.post('/transfers/internal', authenticate, [
 app.get('/transfers', authenticate, async (req, res) => {
   try {
     const userAccounts = dataStoreHelpers.findUserAccounts(req.user.id);
-    const accountIds = userAccounts.map(account => account.id);
+    const accountNumbers = userAccounts.map(account => account.account_number);
     
     const transactions = dataStore.transactions.filter(transaction => 
-      accountIds.includes(transaction.from_account) || 
-      accountIds.includes(transaction.to_account)
+      accountNumbers.includes(transaction.from_account) || 
+      accountNumbers.includes(transaction.to_account)
     ).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     res.json({
@@ -470,9 +473,9 @@ app.get('/transfers/:id', authenticate, async (req, res) => {
     }
 
     const userAccounts = dataStoreHelpers.findUserAccounts(req.user.id);
-    const accountIds = userAccounts.map(account => account.id);
+    const accountNumbers = userAccounts.map(account => account.account_number);
 
-    if (!accountIds.includes(transaction.from_account) && !accountIds.includes(transaction.to_account)) {
+    if (!accountNumbers.includes(transaction.from_account) && !accountNumbers.includes(transaction.to_account)) {
       return res.status(403).json({
         status: 'error',
         message: 'Access forbidden'
