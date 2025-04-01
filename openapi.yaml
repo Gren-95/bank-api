@@ -177,11 +177,11 @@ paths:
                   example: securePass123!
                 fullName:
                   type: string
-                  example: John Smith
+                  example: John Doe
                 email:
                   type: string
                   format: email
-                  example: john.smith@example.com
+                  example: john.doe@example.com
       responses:
         '201':
           description: User registered successfully
@@ -573,7 +573,7 @@ paths:
                     example: success
                   receiverName:
                     type: string
-                    example: John Smith
+                    example: John Doe
                   transactionId:
                     type: integer
                     example: 42
@@ -614,7 +614,7 @@ paths:
                     example: success
                   receiverName:
                     type: string
-                    example: John Smith
+                    example: John Doe
                   transactionId:
                     type: integer
                     example: 42

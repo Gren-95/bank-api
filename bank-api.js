@@ -667,7 +667,7 @@ app.post('/transfers/external', authenticate, [
   try {
     const { fromAccount, toAccount, amount, currency, explanation } = req.body;
     
-    const sourceAccount = dataStoreHelpers.findAccountById(fromAccount);
+    const sourceAccount = dataStoreHelpers.findAccountByNumber(fromAccount);
     if (!sourceAccount) {
       return res.status(404).json({
         status: 'error',
@@ -678,7 +678,7 @@ app.post('/transfers/external', authenticate, [
     if (sourceAccount.user_id !== req.user.id) {
       return res.status(403).json({
         status: 'error',
-        message: 'Access forbidden'
+        message: 'Access forbidden - not your account'
       });
     }
 
@@ -709,7 +709,7 @@ app.post('/transfers/external', authenticate, [
       amount: finalAmount,
       currency: sourceAccount.currency,
       explanation,
-      sender_name: req.user.full_name,
+      sender_name: req.user.full_name || 'User',
       receiver_name: 'External Account',
       is_external: true
     });
@@ -723,9 +723,10 @@ app.post('/transfers/external', authenticate, [
       message: 'External transfer initiated successfully'
     });
   } catch (error) {
+    console.error('External transfer error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Server error creating external transfer'
+      message: 'Server error processing external transfer'
     });
   }
 });
