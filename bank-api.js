@@ -682,19 +682,26 @@ app.post('/transfers/external', authenticate, [
       });
     }
 
-    // Convert amount if currencies differ
+    // Calculate final amount with currency conversion if needed
     let finalAmount = amount;
     if (sourceAccount.currency !== currency) {
-      const rate = exchangeRates[sourceAccount.currency][currency];
-      if (!rate) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Unsupported currency conversion'
-        });
+      // First convert to EUR if source is not EUR
+      let amountInEUR = amount;
+      if (sourceAccount.currency !== 'EUR') {
+        const rateToEUR = exchangeRates[sourceAccount.currency]['EUR'];
+        amountInEUR = amount * rateToEUR;
       }
-      finalAmount = amount * rate;
+      
+      // Then convert from EUR to target currency if needed
+      if (currency !== 'EUR') {
+        const rateFromEUR = exchangeRates['EUR'][currency];
+        finalAmount = amountInEUR * rateFromEUR;
+      } else {
+        finalAmount = amountInEUR;
+      }
     }
 
+    // Check sufficient funds using amount in source account's currency
     if (sourceAccount.balance < finalAmount) {
       return res.status(402).json({
         status: 'error',
@@ -719,7 +726,11 @@ app.post('/transfers/external', authenticate, [
 
     res.status(201).json({
       status: 'success',
-      data: transaction,
+      data: {
+        ...transaction,
+        exchanged_amount: amount,
+        exchanged_currency: currency
+      },
       message: 'External transfer initiated successfully'
     });
   } catch (error) {
