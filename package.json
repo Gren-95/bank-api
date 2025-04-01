@@ -4,8 +4,8 @@
   "description": "Consolidated Bank API with in-memory storage",
   "main": "bank-api.js",
   "scripts": {
-    "start": "node bank-api.js",
-    "dev": "nodemon bank-api.js"
+    "start": "npm install && node bank-api.js",
+    "dev": "npm install && nodemon bank-api.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

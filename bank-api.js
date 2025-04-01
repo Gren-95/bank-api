@@ -94,6 +94,30 @@ const dataStoreHelpers = {
   }
 };
 
+// Exchange rates data
+const exchangeRates = {
+  EUR: {
+    USD: 1.09,
+    GBP: 0.86,
+    SEK: 11.21
+  },
+  USD: {
+    EUR: 0.92,
+    GBP: 0.79,
+    SEK: 10.28
+  },
+  GBP: {
+    EUR: 1.16,
+    USD: 1.27,
+    SEK: 13.03
+  },
+  SEK: {
+    EUR: 0.089,
+    USD: 0.097,
+    GBP: 0.077
+  }
+};
+
 // Express app setup
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -151,6 +175,13 @@ const jwtKeys = {
 };
 
 // Routes
+app.get('/bank-info', (req, res) => {
+  res.json({
+    name: process.env.BANK_NAME || 'Bank API',
+    prefix: process.env.BANK_PREFIX || 'BANK'
+  });
+});
+
 app.get('/jwks.json', (req, res) => {
   res.json(jwtKeys);
 });
@@ -274,13 +305,14 @@ app.post('/accounts', authenticate, [
       account_number: `${process.env.BANK_PREFIX || 'BANK'}${Date.now()}`,
       user_id: req.user.id,
       currency,
-      name
+      name,
+      balance: 1000
     });
 
     res.status(201).json({
       status: 'success',
       data: account,
-      message: 'Account created successfully'
+      message: 'Account created successfully with initial balance of 1000'
     });
   } catch (error) {
     res.status(500).json({
@@ -401,7 +433,7 @@ app.get('/transfers', authenticate, async (req, res) => {
   }
 });
 
-app.get('/transfers/{id}', authenticate, async (req, res) => {
+app.get('/transfers/:id', authenticate, async (req, res) => {
   try {
     const transaction = dataStore.transactions.find(t => t.id === parseInt(req.params.id));
     
@@ -434,12 +466,240 @@ app.get('/transfers/{id}', authenticate, async (req, res) => {
   }
 });
 
+app.get('/exchange-rates', (req, res) => {
+  const { base, target } = req.query;
+  const validCurrencies = ['EUR', 'USD', 'GBP', 'SEK'];
+
+  if (!base || !validCurrencies.includes(base)) {
+    return res.status(400).json({
+      status: 'error',
+      errors: [{
+        msg: 'Base currency must be EUR, USD, GBP, or SEK'
+      }]
+    });
+  }
+
+  if (target && !validCurrencies.includes(target)) {
+    return res.status(400).json({
+      status: 'error',
+      errors: [{
+        msg: 'Target currency must be EUR, USD, GBP, or SEK'
+      }]
+    });
+  }
+
+  const response = {
+    status: 'success',
+    base,
+    timestamp: new Date().toISOString(),
+    rates: target ? { [target]: exchangeRates[base][target] } : exchangeRates[base]
+  };
+
+  res.json(response);
+});
+
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'success',
     message: 'API is operational',
     timestamp: new Date().toISOString()
   });
+});
+
+// Bank-to-Bank transaction processing
+const processB2BTransaction = async (jwt) => {
+  try {
+    const decoded = jwt.verify(jwt, process.env.JWT_PUBLIC_KEY?.replace(/\\n/g, '\n') || 'your-public-key');
+    const { toAccount, amount, currency, senderName } = decoded;
+
+    const targetAccount = dataStoreHelpers.findAccountById(toAccount);
+    if (!targetAccount) {
+      throw new Error('Destination account not found');
+    }
+
+    // Convert amount if currencies differ
+    let finalAmount = amount;
+    if (targetAccount.currency !== currency) {
+      const rate = exchangeRates[currency][targetAccount.currency];
+      if (!rate) {
+        throw new Error('Unsupported currency conversion');
+      }
+      finalAmount = amount * rate;
+    }
+
+    // Create and process the transaction
+    const transaction = dataStoreHelpers.createTransaction({
+      from_account: 'EXTERNAL',
+      to_account: toAccount,
+      amount: finalAmount,
+      currency: targetAccount.currency,
+      explanation: `External transfer from ${senderName}`,
+      sender_name: senderName,
+      receiver_name: targetAccount.name,
+      is_external: true
+    });
+
+    // Update account balance
+    dataStoreHelpers.updateAccountBalance(toAccount, finalAmount);
+
+    return {
+      status: 'success',
+      receiverName: targetAccount.name,
+      transactionId: transaction.id
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
+// Routes
+app.post('/transactions/b2b', async (req, res) => {
+  try {
+    const { jwt } = req.body;
+    if (!jwt) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'JWT is required'
+      });
+    }
+
+    const result = await processB2BTransaction(jwt);
+    res.json(result);
+  } catch (error) {
+    if (error.message === 'Destination account not found') {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Destination account not found'
+      });
+    }
+    if (error.message === 'Unsupported currency conversion') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Unsupported currency conversion'
+      });
+    }
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid JWT or signature'
+      });
+    }
+    res.status(500).json({
+      status: 'error',
+      message: 'Error processing transaction'
+    });
+  }
+});
+
+app.post('/transfers/incoming', async (req, res) => {
+  try {
+    const { jwt } = req.body;
+    if (!jwt) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'JWT is required'
+      });
+    }
+
+    const result = await processB2BTransaction(jwt);
+    res.json(result);
+  } catch (error) {
+    if (error.message === 'Destination account not found') {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Destination account not found'
+      });
+    }
+    if (error.message === 'Unsupported currency conversion') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Unsupported currency conversion'
+      });
+    }
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid JWT or signature'
+      });
+    }
+    res.status(500).json({
+      status: 'error',
+      message: 'Error processing transaction'
+    });
+  }
+});
+
+app.post('/transfers/external', authenticate, [
+  body('fromAccount').isString(),
+  body('toAccount').isString(),
+  body('amount').isFloat({ min: 0 }),
+  body('currency').isIn(['EUR', 'USD', 'GBP', 'SEK']),
+  body('explanation').isString().trim().notEmpty()
+], async (req, res) => {
+  try {
+    const { fromAccount, toAccount, amount, currency, explanation } = req.body;
+    
+    const sourceAccount = dataStoreHelpers.findAccountById(fromAccount);
+    if (!sourceAccount) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Source account not found'
+      });
+    }
+
+    if (sourceAccount.user_id !== req.user.id) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Access forbidden'
+      });
+    }
+
+    // Convert amount if currencies differ
+    let finalAmount = amount;
+    if (sourceAccount.currency !== currency) {
+      const rate = exchangeRates[sourceAccount.currency][currency];
+      if (!rate) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Unsupported currency conversion'
+        });
+      }
+      finalAmount = amount * rate;
+    }
+
+    if (sourceAccount.balance < finalAmount) {
+      return res.status(402).json({
+        status: 'error',
+        message: 'Insufficient funds'
+      });
+    }
+
+    // Create transaction record
+    const transaction = dataStoreHelpers.createTransaction({
+      from_account: fromAccount,
+      to_account: toAccount,
+      amount: finalAmount,
+      currency: sourceAccount.currency,
+      explanation,
+      sender_name: req.user.full_name,
+      receiver_name: 'External Account',
+      is_external: true
+    });
+
+    // Update source account balance
+    dataStoreHelpers.updateAccountBalance(fromAccount, -finalAmount);
+
+    res.status(201).json({
+      status: 'success',
+      data: transaction,
+      message: 'External transfer initiated successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error creating external transfer'
+    });
+  }
 });
 
 // Error handler
