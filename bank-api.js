@@ -674,6 +674,14 @@ app.post('/transfers/external', authenticate, [
   body('explanation').isString().trim().notEmpty()
 ], async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        errors: errors.array()
+      });
+    }
+
     const { fromAccount, toAccount, amount, currency, explanation } = req.body;
     
     const sourceAccount = dataStoreHelpers.findAccountByNumber(fromAccount);
@@ -694,19 +702,39 @@ app.post('/transfers/external', authenticate, [
     // Calculate final amount with currency conversion if needed
     let debitAmount = amount;
     if (sourceAccount.currency !== currency) {
-      // First convert to EUR if source is not EUR
-      let amountInEUR = amount;
-      if (currency !== 'EUR') {
-        const rateToEUR = exchangeRates[currency]['EUR'];
-        amountInEUR = amount * rateToEUR;
-      }
-      
-      // Then convert from EUR to source account currency if needed
-      if (sourceAccount.currency !== 'EUR') {
-        const rateFromEUR = exchangeRates['EUR'][sourceAccount.currency];
-        debitAmount = amountInEUR * rateFromEUR;
-      } else {
-        debitAmount = amountInEUR;
+      try {
+        // First convert to EUR if source is not EUR
+        let amountInEUR = amount;
+        if (currency !== 'EUR') {
+          if (!exchangeRates[currency] || !exchangeRates[currency]['EUR']) {
+            return res.status(400).json({
+              status: 'error',
+              message: `Unsupported currency conversion from ${currency} to EUR`
+            });
+          }
+          const rateToEUR = exchangeRates[currency]['EUR'];
+          amountInEUR = amount * rateToEUR;
+        }
+        
+        // Then convert from EUR to source account currency if needed
+        if (sourceAccount.currency !== 'EUR') {
+          if (!exchangeRates['EUR'] || !exchangeRates['EUR'][sourceAccount.currency]) {
+            return res.status(400).json({
+              status: 'error',
+              message: `Unsupported currency conversion from EUR to ${sourceAccount.currency}`
+            });
+          }
+          const rateFromEUR = exchangeRates['EUR'][sourceAccount.currency];
+          debitAmount = amountInEUR * rateFromEUR;
+        } else {
+          debitAmount = amountInEUR;
+        }
+      } catch (conversionError) {
+        console.error('Currency conversion error:', conversionError);
+        return res.status(400).json({
+          status: 'error',
+          message: 'Error during currency conversion'
+        });
       }
     }
 
@@ -732,8 +760,15 @@ app.post('/transfers/external', authenticate, [
       exchanged_currency: currency
     });
 
+    if (!transaction) {
+      throw new Error('Failed to create transaction record');
+    }
+
     // Update source account balance
-    dataStoreHelpers.updateAccountBalance(fromAccount, -debitAmount);
+    const balanceUpdated = dataStoreHelpers.updateAccountBalance(fromAccount, -debitAmount);
+    if (!balanceUpdated) {
+      throw new Error('Failed to update account balance');
+    }
 
     res.status(201).json({
       status: 'success',
@@ -744,7 +779,8 @@ app.post('/transfers/external', authenticate, [
     console.error('External transfer error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Server error processing external transfer'
+      message: 'Server error processing external transfer',
+      details: error.message
     });
   }
 });
