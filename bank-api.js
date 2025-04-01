@@ -78,10 +78,19 @@ const dataStoreHelpers = {
   // Transaction helpers
   createTransaction: (transactionData) => {
     const transaction = {
-      id: dataStore.nextTransactionId++,
-      ...transactionData,
+      id: dataStore.transactions.length + 1,
+      from_account: transactionData.from_account,
+      to_account: transactionData.to_account,
+      amount: transactionData.amount,
+      currency: transactionData.currency,
+      explanation: transactionData.explanation,
+      sender_name: transactionData.sender_name,
+      receiver_name: transactionData.receiver_name,
+      is_external: transactionData.is_external || false,
       status: 'COMPLETED',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      exchanged_amount: transactionData.exchanged_amount,
+      exchanged_currency: transactionData.exchanged_currency
     };
     dataStore.transactions.push(transaction);
     return transaction;
@@ -683,26 +692,26 @@ app.post('/transfers/external', authenticate, [
     }
 
     // Calculate final amount with currency conversion if needed
-    let finalAmount = amount;
+    let debitAmount = amount;
     if (sourceAccount.currency !== currency) {
       // First convert to EUR if source is not EUR
       let amountInEUR = amount;
-      if (sourceAccount.currency !== 'EUR') {
-        const rateToEUR = exchangeRates[sourceAccount.currency]['EUR'];
+      if (currency !== 'EUR') {
+        const rateToEUR = exchangeRates[currency]['EUR'];
         amountInEUR = amount * rateToEUR;
       }
       
-      // Then convert from EUR to target currency if needed
-      if (currency !== 'EUR') {
-        const rateFromEUR = exchangeRates['EUR'][currency];
-        finalAmount = amountInEUR * rateFromEUR;
+      // Then convert from EUR to source account currency if needed
+      if (sourceAccount.currency !== 'EUR') {
+        const rateFromEUR = exchangeRates['EUR'][sourceAccount.currency];
+        debitAmount = amountInEUR * rateFromEUR;
       } else {
-        finalAmount = amountInEUR;
+        debitAmount = amountInEUR;
       }
     }
 
     // Check sufficient funds using amount in source account's currency
-    if (sourceAccount.balance < finalAmount) {
+    if (sourceAccount.balance < debitAmount) {
       return res.status(402).json({
         status: 'error',
         message: 'Insufficient funds'
@@ -713,24 +722,22 @@ app.post('/transfers/external', authenticate, [
     const transaction = dataStoreHelpers.createTransaction({
       from_account: fromAccount,
       to_account: toAccount,
-      amount: finalAmount,
+      amount: debitAmount,
       currency: sourceAccount.currency,
       explanation,
       sender_name: req.user.full_name || 'User',
       receiver_name: 'External Account',
-      is_external: true
+      is_external: true,
+      exchanged_amount: amount,
+      exchanged_currency: currency
     });
 
     // Update source account balance
-    dataStoreHelpers.updateAccountBalance(fromAccount, -finalAmount);
+    dataStoreHelpers.updateAccountBalance(fromAccount, -debitAmount);
 
     res.status(201).json({
       status: 'success',
-      data: {
-        ...transaction,
-        exchanged_amount: amount,
-        exchanged_currency: currency
-      },
+      data: transaction,
       message: 'External transfer initiated successfully'
     });
   } catch (error) {
