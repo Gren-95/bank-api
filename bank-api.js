@@ -91,6 +91,10 @@ const dataStoreHelpers = {
     return dataStore.transactions
       .filter(transaction => transaction.account_id === accountId)
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  },
+
+  findAccountByNumber: (accountNumber) => {
+    return dataStore.accounts.find(acc => acc.account_number === accountNumber);
   }
 };
 
@@ -361,23 +365,32 @@ app.post('/transfers/internal', authenticate, [
   try {
     const { fromAccount, toAccount, amount, explanation } = req.body;
     
-    const sourceAccount = dataStoreHelpers.findAccountById(fromAccount);
-    const targetAccount = dataStoreHelpers.findAccountById(toAccount);
-
-    if (!sourceAccount || !targetAccount) {
+    // Find source and destination accounts
+    const sourceAccount = dataStoreHelpers.findAccountByNumber(fromAccount);
+    if (!sourceAccount) {
       return res.status(404).json({
         status: 'error',
-        message: 'Account not found'
+        message: 'Source account not found'
       });
     }
 
+    const destAccount = dataStoreHelpers.findAccountByNumber(toAccount);
+    if (!destAccount) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Destination account not found'
+      });
+    }
+
+    // Verify ownership
     if (sourceAccount.user_id !== req.user.id) {
       return res.status(403).json({
         status: 'error',
-        message: 'Access forbidden'
+        message: 'Access forbidden - not your account'
       });
     }
 
+    // Check sufficient funds
     if (sourceAccount.balance < amount) {
       return res.status(402).json({
         status: 'error',
@@ -385,13 +398,23 @@ app.post('/transfers/internal', authenticate, [
       });
     }
 
+    // Check same currency
+    if (sourceAccount.currency !== destAccount.currency) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Cannot transfer between accounts with different currencies'
+      });
+    }
+
+    // Create transaction record
     const transaction = dataStoreHelpers.createTransaction({
       from_account: fromAccount,
       to_account: toAccount,
       amount,
+      currency: sourceAccount.currency,
       explanation,
-      sender_name: req.user.full_name,
-      receiver_name: targetAccount.name,
+      sender_name: req.user.full_name || 'User',
+      receiver_name: destAccount.name,
       is_external: false
     });
 
@@ -401,12 +424,14 @@ app.post('/transfers/internal', authenticate, [
 
     res.status(201).json({
       status: 'success',
-      data: transaction
+      data: transaction,
+      message: 'Internal transfer completed successfully'
     });
   } catch (error) {
+    console.error('Internal transfer error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Server error creating transaction'
+      message: 'Server error processing internal transfer'
     });
   }
 });
