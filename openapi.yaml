@@ -672,10 +672,10 @@ paths:
                 properties:
                   name:
                     type: string
-                    example: Eero Bank
+                    example: Efe Bank
                   prefix:
                     type: string
-                    example: 353
+                    example: 000
         '401':
           $ref: '#/components/responses/UnauthorizedError'
 
