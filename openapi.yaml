@@ -1,0 +1,741 @@
+openapi: 3.0.0
+info:
+  title: Bank API
+  version: 1.0.0
+  description: Bank API with interoperability features
+
+servers:
+  - url: /
+    description: Current server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  
+  schemas:
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Account ID
+        accountNumber:
+          type: string
+          description: Unique account number with bank prefix
+        userId:
+          type: integer
+          description: ID of the account owner
+        balance:
+          type: number
+          format: float
+          description: Current account balance
+        currency:
+          type: string
+          enum: [EUR, USD, GBP, SEK]
+          description: Account currency
+        name:
+          type: string
+          description: Account name/description
+        createdAt:
+          type: string
+          format: date-time
+          description: Account creation date
+      required:
+        - accountNumber
+        - userId
+        - currency
+        - name
+    
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Transaction ID
+        fromAccount:
+          type: string
+          description: Source account number
+        toAccount:
+          type: string
+          description: Destination account number
+        amount:
+          type: number
+          format: float
+          description: Transaction amount
+        currency:
+          type: string
+          enum: [EUR, USD, GBP]
+          description: Transaction currency
+        explanation:
+          type: string
+          description: Transaction description
+        senderName:
+          type: string
+          description: Name of the sender
+        receiverName:
+          type: string
+          description: Name of the receiver
+        status:
+          type: string
+          enum: [pending, inProgress, completed, failed]
+          description: Transaction status
+        isExternal:
+          type: boolean
+          description: Whether this is an external transaction
+        createdAt:
+          type: string
+          format: date-time
+          description: Transaction creation date
+  
+  responses:
+    UnauthorizedError:
+      description: Access token is missing or invalid
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                example: error
+              message:
+                type: string
+                example: Authentication required
+    
+    ValidationError:
+      description: Input validation error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                example: error
+              errors:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    field:
+                      type: string
+                    message:
+                      type: string
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Get API health status
+      security: []
+      tags: [System]
+      responses:
+        '200':
+          description: API is operational
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  message:
+                    type: string
+                    example: API is operational
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /users:
+    post:
+      summary: Register a new user
+      tags: [Users]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+                - fullName
+                - email
+              properties:
+                username:
+                  type: string
+                  example: jsmith
+                password:
+                  type: string
+                  example: securePass123!
+                fullName:
+                  type: string
+                  example: John Smith
+                email:
+                  type: string
+                  format: email
+                  example: john.smith@example.com
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  message:
+                    type: string
+                    example: User registered successfully
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /users/me:
+    get:
+      summary: Get current user profile
+      tags: [Users]
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                      username:
+                        type: string
+                      fullName:
+                        type: string
+                      email:
+                        type: string
+                        format: email
+                      createdAt:
+                        type: string
+                        format: date-time
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /sessions:
+    post:
+      summary: Login user
+      tags: [Sessions]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: jsmith
+                password:
+                  type: string
+                  example: securePass123!
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                      username:
+                        type: string
+                      fullName:
+                        type: string
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Invalid credentials
+    delete:
+      summary: Logout current user
+      tags: [Sessions]
+      responses:
+        '200':
+          description: User logged out successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  message:
+                    type: string
+                    example: Successfully logged out
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /accounts:
+    get:
+      summary: Get all accounts for current user
+      tags: [Accounts]
+      parameters:
+        - in: query
+          name: currency
+          schema:
+            type: string
+          description: Filter by currency (EUR, USD, GBP)
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [balance, -balance, name, -name, createdAt, -createdAt]
+          description: Sort accounts (prefix with - for descending)
+      responses:
+        '200':
+          description: List of user accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Account'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    
+    post:
+      summary: Create a new account
+      tags: [Accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - currency
+                - name
+              properties:
+                currency:
+                  type: string
+                  enum: [EUR, USD, GBP, SEK]
+                  example: EUR
+                name:
+                  type: string
+                  example: Main Savings
+      responses:
+        '201':
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Account'
+                  message:
+                    type: string
+                    example: Account created successfully
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /transfers:
+    get:
+      summary: Get all transactions for the user
+      tags: [Transactions]
+      responses:
+        '200':
+          description: List of user transactions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /transfers/internal:
+    post:
+      summary: Create a new internal transaction
+      tags: [Transactions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fromAccount
+                - toAccount
+                - amount
+                - explanation
+              properties:
+                fromAccount:
+                  type: string
+                  example: 353c8b72e4a9f15d3b82
+                toAccount:
+                  type: string
+                  example: 353f9a23d1c7b45e8t91
+                amount:
+                  type: number
+                  example: 150.00
+                explanation:
+                  type: string
+                  example: Rent payment for January
+      responses:
+        '201':
+          description: Transaction created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '402':
+          description: Insufficient funds
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Insufficient funds
+        '404':
+          description: Account not found
+
+  /transfers/external:
+    post:
+      summary: Create a new external transaction
+      tags: [Transactions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fromAccount
+                - toAccount
+                - amount
+                - explanation
+              properties:
+                fromAccount:
+                  type: string
+                  example: 353c8b72e4a9f15d3b82
+                toAccount:
+                  type: string
+                  example: 512f9a23d1c7b45e8t91
+                amount:
+                  type: number
+                  example: 150.00
+                explanation:
+                  type: string
+                  example: Payment for services
+      responses:
+        '201':
+          description: Transaction created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '402':
+          description: Insufficient funds
+        '404':
+          description: Account not found
+
+  /transfers/{id}:
+    get:
+      summary: Get transaction details
+      tags: [Transactions]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Transaction details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '404':
+          description: Transaction not found
+        '403':
+          description: Access forbidden
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /transfers/incoming:
+    post:
+      summary: Process incoming transfer
+      tags: [Bank-to-Bank]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - jwt
+              properties:
+                jwt:
+                  type: string
+                  example: eyJhbGciOiJSUzI1NiIsImtpZCI6IjEiLCJ0eXAiOiJKV1QifQ...
+      responses:
+        '200':
+          description: Transaction processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  receiverName:
+                    type: string
+                    example: John Smith
+                  transactionId:
+                    type: integer
+                    example: 42
+        '400':
+          description: Invalid JWT or signature
+        '404':
+          description: Destination account not found
+        '500':
+          description: Processing error
+
+  /transactions/b2b:
+    post:
+      summary: Process incoming transfer (Bank-to-Bank)
+      tags: [Bank-to-Bank]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - jwt
+              properties:
+                jwt:
+                  type: string
+                  example: eyJhbGciOiJSUzI1NiIsImtpZCI6IjEiLCJ0eXAiOiJKV1QifQ...
+      responses:
+        '200':
+          description: Transaction processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  receiverName:
+                    type: string
+                    example: John Smith
+                  transactionId:
+                    type: integer
+                    example: 42
+        '400':
+          description: Invalid JWT or signature
+        '404':
+          description: Destination account not found
+        '500':
+          description: Processing error
+
+  /jwks.json:
+    get:
+      summary: Get JSON Web Key Set
+      tags: [Security]
+      security: []
+      responses:
+        '200':
+          description: JWKS with public keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kty:
+                          type: string
+                        kid:
+                          type: string
+                        use:
+                          type: string
+                        alg:
+                          type: string
+                        n:
+                          type: string
+                        e:
+                          type: string
+        '500':
+          description: Error retrieving JWKS
+
+  /bank-info:
+    get:
+      summary: Get bank information
+      tags: [Info]
+      responses:
+        '200':
+          description: Bank information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: Eero Bank
+                  prefix:
+                    type: string
+                    example: 353
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /exchange-rates:
+    get:
+      summary: Get current exchange rates
+      tags: [Currency]
+      parameters:
+        - in: query
+          name: base
+          required: true
+          schema:
+            type: string
+            enum: [EUR, USD, GBP, SEK]
+          description: Base currency
+        - in: query
+          name: target
+          required: false
+          schema:
+            type: string
+            enum: [EUR, USD, GBP, SEK]
+          description: Target currency (optional - if not provided returns all rates)
+      responses:
+        '200':
+          description: Current exchange rates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  base:
+                    type: string
+                    example: EUR
+                  timestamp:
+                    type: string
+                    format: date-time
+                  rates:
+                    type: object
+                    example:
+                      USD: 1.09
+                      GBP: 0.86
+                      SEK: 11.21
+        '400':
+          description: Invalid currency
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        msg:
+                          type: string
+                          example: Base currency must be EUR, USD, GBP, or SEK
