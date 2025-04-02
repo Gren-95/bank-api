@@ -836,58 +836,87 @@ app.post('/transfers/external', authenticate, [
       
       console.log(`Sending transaction to ${bankDetails.transactionUrl}`);
       
-      // Send to destination bank's B2B endpoint
-      const response = await fetch(bankDetails.transactionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ jwt: jwtToken })
-      });
+      // Add retry logic for the external transfer
+      const maxRetries = 3;
+      const retryDelay = 2000; // 2 seconds
+      let lastError = null;
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Destination bank responded with error: ${response.status}`, errorText);
-        
-        // Update transaction as failed
-        transaction.status = 'failed';
-        transaction.explanation = explanation + ` (Error: ${response.status})`;
-        
-        throw new Error(`Destination bank responded with status: ${response.status} - ${errorText}`);
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+          const response = await fetch(bankDetails.transactionUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({ jwt: jwtToken }),
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Destination bank responded with error: ${response.status}`, errorText);
+            
+            if (response.status === 504 && attempt < maxRetries) {
+              console.log(`Attempt ${attempt} failed with timeout, retrying in ${retryDelay/1000} seconds...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay));
+              continue;
+            }
+            
+            throw new Error(`Destination bank responded with status: ${response.status} - ${errorText}`);
+          }
+
+          const result = await response.json();
+          console.log(`Transaction successful:`, result);
+          
+          // Update transaction with receiver name and status
+          transaction.status = 'completed';
+          if (result && result.receiverName) {
+            transaction.receiver_name = result.receiverName;
+          }
+
+          // Update source account balance
+          dataStoreHelpers.updateAccountBalance(fromAccount, -amount);
+
+          // Format response data
+          const transactionData = {
+            id: transaction.id,
+            fromAccount: transaction.from_account,
+            toAccount: transaction.to_account,
+            amount: parseFloat(transaction.amount),
+            currency: transaction.currency,
+            explanation: transaction.explanation,
+            senderName: transaction.sender_name,
+            receiverName: transaction.receiver_name,
+            status: transaction.status,
+            createdAt: transaction.created_at,
+            isExternal: true
+          };
+
+          return res.status(201).json({
+            status: 'success',
+            data: transactionData
+          });
+
+        } catch (error) {
+          lastError = error;
+          if (error.name === 'AbortError' && attempt < maxRetries) {
+            console.log(`Attempt ${attempt} timed out, retrying in ${retryDelay/1000} seconds...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            continue;
+          }
+          throw error;
+        }
       }
 
-      const result = await response.json();
-      console.log(`Transaction successful:`, result);
-      
-      // Update transaction with receiver name and status
-      transaction.status = 'completed';
-      if (result && result.receiverName) {
-        transaction.receiver_name = result.receiverName;
-      }
+      // If we get here, all retries failed
+      throw lastError;
 
-      // Update source account balance
-      dataStoreHelpers.updateAccountBalance(fromAccount, -amount);
-
-      // Format response data
-      const transactionData = {
-        id: transaction.id,
-        fromAccount: transaction.from_account,
-        toAccount: transaction.to_account,
-        amount: parseFloat(transaction.amount),
-        currency: transaction.currency,
-        explanation: transaction.explanation,
-        senderName: transaction.sender_name,
-        receiverName: transaction.receiver_name,
-        status: transaction.status,
-        createdAt: transaction.created_at,
-        isExternal: true
-      };
-
-      res.status(201).json({
-        status: 'success',
-        data: transactionData
-      });
     } catch (error) {
       // Transaction failed
       console.error('External transfer error:', error);
