@@ -698,11 +698,28 @@ const centralBankService = {
   }
 };
 
-// Add key manager simulation
+// Add key manager
 const keyManager = {
   sign: (payload) => {
-    // In real implementation, this would use proper JWT signing with private key
-    return jwt.sign(payload, process.env.JWT_SECRET || 'your-secret-key');
+    // Create JWT with proper claims
+    const token = jwt.sign({
+      accountFrom: payload.accountFrom,
+      accountTo: payload.accountTo,
+      currency: payload.currency,
+      amount: payload.amount,
+      explanation: payload.explanation,
+      senderName: payload.senderName,
+      originalCurrency: payload.originalCurrency,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + (60 * 5), // 5 minutes expiry
+      iss: process.env.BANK_PREFIX || 'BANK',
+      aud: 'bank-api'
+    }, process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n') || 'your-private-key', {
+      algorithm: 'RS256',
+      keyid: '1'
+    });
+
+    return token;
   }
 };
 
@@ -793,7 +810,7 @@ app.post('/transfers/external', authenticate, [
         accountFrom: fromAccount,
         accountTo: toAccount,
         currency: sourceAccount.currency,
-        amount,
+        amount: parseFloat(amount),
         explanation,
         senderName: req.user.full_name || 'User',
         originalCurrency: sourceAccount.currency
