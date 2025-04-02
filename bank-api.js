@@ -546,7 +546,12 @@ app.get('/health', (req, res) => {
 // Bank-to-Bank transaction processing
 const processB2BTransaction = async (jwt) => {
   try {
-    const decoded = jwt.verify(jwt, process.env.JWT_PUBLIC_KEY?.replace(/\\n/g, '\n') || 'your-public-key');
+    const publicKey = process.env.JWT_PUBLIC_KEY?.replace(/\\n/g, '\n');
+    if (!publicKey) {
+      throw new Error('JWT_PUBLIC_KEY environment variable is not set');
+    }
+
+    const decoded = jwt.verify(jwt, publicKey, { algorithms: ['RS256'] });
     const { toAccount, amount, currency, senderName } = decoded;
 
     const targetAccount = dataStoreHelpers.findAccountById(toAccount);
