@@ -7,6 +7,8 @@ info:
 servers:
   - url: /
     description: Current server
+  - url: https://bank.bee-srv.me
+    description: Bank API
 
 components:
   securitySchemes:
@@ -181,7 +183,7 @@ paths:
                 email:
                   type: string
                   format: email
-                  example: john.doe@example.com
+                  example: john.doe@bank.efe
       responses:
         '201':
           description: User registered successfully
@@ -424,10 +426,10 @@ paths:
               properties:
                 fromAccount:
                   type: string
-                  example: 353c8b72e4a9f15d3b82
+                  example: string
                 toAccount:
                   type: string
-                  example: 353f9a23d1c7b45e8t91
+                  example: string
                 amount:
                   type: number
                   example: 150.00
@@ -483,10 +485,10 @@ paths:
               properties:
                 fromAccount:
                   type: string
-                  example: 353c8b72e4a9f15d3b82
+                  example: string
                 toAccount:
                   type: string
-                  example: 512f9a23d1c7b45e8t91
+                  example: 61c8ef8e5c2a7c90fb67b5a502a34291ae5
                 amount:
                   type: number
                   example: 150.00
