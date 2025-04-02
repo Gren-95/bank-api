@@ -185,11 +185,11 @@ try {
   if (!secret) {
     throw new Error('JWT_SECRET environment variable is not set');
   }
-
-  // Use the secret as a seed for key generation
+  
+  // Use the JWT_SECRET as a seed for key generation
   const seed = crypto.createHash('sha256').update(secret).digest();
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
-    modulusLength: 2048,
+    modulusLength: 4096, // Increased from 2048 to 4096 for longer key
     publicKeyEncoding: {
       type: 'spki',
       format: 'pem'
@@ -212,7 +212,7 @@ const jwtKeys = {
   keys: [
     {
       kty: 'RSA',
-      kid: 'a901058d-d100-4aa4-9297-8e2074428af7',
+      kid: process.env.JWT_SECRET,
       use: 'sig',
       alg: 'RS256',
       n: generatedKeys.publicKey.split('\n')[1],
@@ -789,10 +789,10 @@ const keyManager = {
         explanation: payload.explanation
       }, generatedKeys.privateKey, {
         algorithm: 'RS256',
-        keyid: 'a901058d-d100-4aa4-9297-8e2074428af7',
+        keyid: process.env.JWT_SECRET,
         header: {
           alg: 'RS256',
-          kid: 'a901058d-d100-4aa4-9297-8e2074428af7',
+          kid: process.env.JWT_SECRET,
           typ: 'JWT'
         }
       });
