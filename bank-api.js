@@ -145,7 +145,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Swagger UI
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -670,18 +670,21 @@ app.post('/transfers/incoming', async (req, res) => {
 const centralBankService = {
   getBankDetails: async (bankPrefix) => {
     try {
-      // In real implementation, this would query the central bank's API
-      const response = await fetch(`${process.env.CENTRAL_BANK_URL || 'http://central-bank.example.com'}/api/v1/banks/${bankPrefix}`);
+      // Query the central bank's API for all banks
+      const response = await fetch('https://henno.cfd/central-bank/banks');
       
       if (!response.ok) {
-        console.error(`Failed to get bank details for prefix: ${bankPrefix}`);
+        console.error(`Failed to get bank details from central bank`);
         return null;
       }
 
-      const bankDetails = await response.json();
+      const banks = await response.json();
       
-      if (!bankDetails || bankDetails.status !== 'active') {
-        console.error(`Bank ${bankPrefix} is not active or not found`);
+      // Find the bank with matching prefix
+      const bankDetails = banks.find(bank => bank.bankPrefix === bankPrefix);
+      
+      if (!bankDetails) {
+        console.error(`Bank with prefix ${bankPrefix} not found in central bank registry`);
         return null;
       }
 
@@ -887,5 +890,5 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  console.log(`API Documentation available at http://localhost:${PORT}/api-docs`);
+  console.log(`API Documentation available at http://localhost:${PORT}/docs`);
 }); 
