@@ -546,30 +546,50 @@ app.get('/health', (req, res) => {
 // Bank-to-Bank transaction processing
 const processB2BTransaction = async (jwt) => {
   try {
+    console.log('[B2B Transaction] Starting JWT verification...');
+    
+    // Get the public key from environment
     const publicKey = process.env.JWT_PUBLIC_KEY?.replace(/\\n/g, '\n');
     if (!publicKey) {
+      console.error('[B2B Transaction] JWT_PUBLIC_KEY environment variable is not set');
       throw new Error('JWT_PUBLIC_KEY environment variable is not set');
     }
 
-    const decoded = jwt.verify(jwt, publicKey, { algorithms: ['RS256'] });
-    const { toAccount, fromAccount, amount, currency, senderName, explanation } = decoded;
+    // Verify the JWT
+    console.log('[B2B Transaction] Verifying JWT signature...');
+    const decoded = jwt.verify(jwt, publicKey, { 
+      algorithms: ['RS256'],
+      issuer: 'bank-api',
+      audience: 'bank-api'
+    });
+    
+    console.log('[B2B Transaction] JWT verified successfully. Decoded payload:', JSON.stringify(decoded, null, 2));
 
-    const targetAccount = dataStoreHelpers.findAccountById(toAccount);
+    const { toAccount, fromAccount, amount, currency, senderName, explanation } = decoded;
+    console.log(`[B2B Transaction] Processing transfer from ${fromAccount} to ${toAccount} for amount ${amount} ${currency}`);
+
+    // Find the destination account
+    const targetAccount = dataStoreHelpers.findAccountByNumber(toAccount);
     if (!targetAccount) {
+      console.error(`[B2B Transaction] Destination account ${toAccount} not found`);
       throw new Error('Destination account not found');
     }
 
     // Convert amount if currencies differ
     let finalAmount = amount;
     if (targetAccount.currency !== currency) {
+      console.log(`[B2B Transaction] Converting amount from ${currency} to ${targetAccount.currency}`);
       const rate = exchangeRates[currency][targetAccount.currency];
       if (!rate) {
+        console.error(`[B2B Transaction] Unsupported currency conversion from ${currency} to ${targetAccount.currency}`);
         throw new Error('Unsupported currency conversion');
       }
       finalAmount = amount * rate;
+      console.log(`[B2B Transaction] Converted amount: ${finalAmount} ${targetAccount.currency}`);
     }
 
     // Create and process the transaction
+    console.log('[B2B Transaction] Creating transaction record...');
     const transaction = dataStoreHelpers.createTransaction({
       from_account: fromAccount,
       to_account: toAccount,
@@ -578,18 +598,32 @@ const processB2BTransaction = async (jwt) => {
       explanation: explanation || `External transfer from ${senderName}`,
       sender_name: senderName,
       receiver_name: targetAccount.name,
-      is_external: true
+      is_external: true,
+      status: 'completed'
     });
 
     // Update account balance
+    console.log(`[B2B Transaction] Updating account balance for ${toAccount} with ${finalAmount}`);
     dataStoreHelpers.updateAccountBalance(toAccount, finalAmount);
 
+    console.log('[B2B Transaction] Transaction completed successfully');
     return {
       status: 'success',
       receiverName: targetAccount.name,
       transactionId: transaction.id
     };
   } catch (error) {
+    console.error('[B2B Transaction] Error processing transaction:', error);
+    console.error('[B2B Transaction] Error stack:', error.stack);
+    
+    if (error.name === 'JsonWebTokenError') {
+      console.error('[B2B Transaction] JWT verification failed:', error.message);
+      throw new Error('Invalid JWT or signature');
+    }
+    if (error.name === 'TokenExpiredError') {
+      console.error('[B2B Transaction] JWT has expired');
+      throw new Error('JWT has expired');
+    }
     throw error;
   }
 };
