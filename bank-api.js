@@ -548,17 +548,17 @@ const processB2BTransaction = async (jwt) => {
   try {
     console.log('[B2B Transaction] Starting JWT verification...');
     
-    // Get the public key from environment
-    const publicKey = process.env.JWT_PUBLIC_KEY?.replace(/\\n/g, '\n');
-    if (!publicKey) {
-      console.error('[B2B Transaction] JWT_PUBLIC_KEY environment variable is not set');
-      throw new Error('JWT_PUBLIC_KEY environment variable is not set');
+    // Get the secret key from environment
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      console.error('[B2B Transaction] JWT_SECRET environment variable is not set');
+      throw new Error('JWT_SECRET environment variable is not set');
     }
 
     // Verify the JWT
     console.log('[B2B Transaction] Verifying JWT signature...');
-    const decoded = jwt.verify(jwt, publicKey, { 
-      algorithms: ['RS256'],
+    const decoded = jwt.verify(jwt, secret, { 
+      algorithms: ['HS256'],
       issuer: 'bank-api',
       audience: 'bank-api'
     });
@@ -749,10 +749,10 @@ const centralBankService = {
 const keyManager = {
   sign: (payload) => {
     try {
-      // Get the private key and ensure it's properly formatted
-      const privateKey = process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n');
-      if (!privateKey) {
-        throw new Error('JWT_PRIVATE_KEY environment variable is not set');
+      // Get the secret key from environment
+      const secret = process.env.JWT_SECRET;
+      if (!secret) {
+        throw new Error('JWT_SECRET environment variable is not set');
       }
 
       // Create JWT with proper claims
@@ -767,17 +767,11 @@ const keyManager = {
         exp: Math.floor(Date.now() / 1000) + (60 * 5), // 5 minutes expiry
         iss: process.env.BANK_PREFIX || 'BANK',
         aud: 'bank-api'
-      }, privateKey, {
-        algorithm: 'RS256',
-        keyid: '1',
-        header: {
-          alg: 'RS256',
-          kid: '1',
-          typ: 'JWT'
-        }
+      }, secret, {
+        algorithm: 'HS256'
       });
 
-      console.log('[JWT Sign] Generated token:', token);
+      console.log('[JWT Sign] Generated token');
       return token;
     } catch (error) {
       console.error('[JWT Sign] Error signing JWT:', error);
