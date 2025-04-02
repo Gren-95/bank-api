@@ -10,6 +10,8 @@ const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
 
 // Load OpenAPI specification
 const swaggerSpec = YAML.load(path.join(__dirname, './openapi.yaml'));
@@ -177,19 +179,26 @@ const authenticate = async (req, res, next) => {
   }
 };
 
-// Generate RSA key pair from secret at startup
-let generatedKeys = null;
+// Key management setup
+const privateKeyPath = path.join(__dirname, 'keys', 'private.pem');
+const publicKeyPath = path.join(__dirname, 'keys', 'public.pem');
+
+// Ensure keys directory exists
+const keysDir = path.join(__dirname, 'keys');
+if (!fs.existsSync(keysDir)) {
+  fs.mkdirSync(keysDir);
+}
+
+// Read or generate keys
+let privateKey, publicKey;
 try {
-  console.log('[Key Generation] Generating RSA key pair from JWT_SECRET...');
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('JWT_SECRET environment variable is not set');
-  }
-  
-  // Use the JWT_SECRET as a seed for key generation
-  const seed = crypto.createHash('sha256').update(secret).digest();
-  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
-    modulusLength: 4096, // Increased from 2048 to 4096 for longer key
+  privateKey = fs.readFileSync(privateKeyPath, 'utf8');
+  publicKey = fs.readFileSync(publicKeyPath, 'utf8');
+  console.log('[Key Management] Loaded existing keys');
+} catch (err) {
+  console.log('[Key Management] No keys found, generating new keys...');
+  const { privateKey: newPrivateKey, publicKey: newPublicKey } = crypto.generateKeyPairSync('rsa', {
+    modulusLength: 4096,
     publicKeyEncoding: {
       type: 'spki',
       format: 'pem'
@@ -200,25 +209,88 @@ try {
     }
   });
 
-  generatedKeys = { privateKey, publicKey };
-  console.log('[Key Generation] Successfully generated RSA key pair');
-} catch (error) {
-  console.error('[Key Generation] Error generating keys:', error);
-  process.exit(1);
+  // Save the keys
+  fs.writeFileSync(privateKeyPath, newPrivateKey);
+  fs.writeFileSync(publicKeyPath, newPublicKey);
+  
+  privateKey = newPrivateKey;
+  publicKey = newPublicKey;
+  console.log('[Key Management] Generated and saved new keys');
 }
 
+// Generate JWKS from public key
+const getJwks = () => {
+  try {
+    // Parse the public key
+    const pemHeader = '-----BEGIN PUBLIC KEY-----';
+    const pemFooter = '-----END PUBLIC KEY-----';
+    const pemContents = publicKey
+      .replace(pemHeader, '')
+      .replace(pemFooter, '')
+      .replace(/\s/g, '');
+
+    // Create modulus and exponent components
+    const publicKeyObject = crypto.createPublicKey({
+      key: publicKey,
+      format: 'pem'
+    });
+
+    const keyData = publicKeyObject.export({ format: 'jwk' });
+
+    // Create a key ID if it doesn't exist
+    const kid = uuidv4();
+
+    // Return JWKS format
+    return {
+      keys: [
+        {
+          kty: "RSA",
+          kid: kid,
+          use: "sig",
+          alg: "RS256",
+          n: keyData.n,
+          e: keyData.e
+        }
+      ]
+    };
+  } catch (error) {
+    console.error('[Key Management] Error generating JWKS:', error);
+    return { keys: [] };
+  }
+};
+
 // JWT Key Management
-const jwtKeys = {
-  keys: [
-    {
-      kty: 'RSA',
-      kid: process.env.JWT_SECRET,
-      use: 'sig',
-      alg: 'RS256',
-      n: generatedKeys.publicKey.split('\n')[1],
-      e: 'AQAB'
+const jwtKeys = getJwks();
+
+// Add key manager
+const keyManager = {
+  sign: (payload) => {
+    try {
+      // Create JWT with proper claims
+      const token = jwt.sign({
+        accountFrom: payload.accountFrom,
+        accountTo: payload.accountTo,
+        amount: payload.amount,
+        currency: payload.currency,
+        senderName: payload.senderName,
+        explanation: payload.explanation
+      }, privateKey, {
+        algorithm: 'RS256',
+        keyid: jwtKeys.keys[0].kid,
+        header: {
+          alg: 'RS256',
+          kid: jwtKeys.keys[0].kid,
+          typ: 'JWT'
+        }
+      });
+
+      console.log('[JWT Sign] Generated token');
+      return token;
+    } catch (error) {
+      console.error('[JWT Sign] Error signing JWT:', error);
+      throw error;
     }
-  ]
+  }
 };
 
 // Routes
@@ -578,14 +650,10 @@ app.get('/health', (req, res) => {
 const processB2BTransaction = async (jwt) => {
   try {
     console.log('[B2B Transaction] Starting JWT verification...');
-    
-    if (!generatedKeys) {
-      throw new Error('RSA keys not generated');
-    }
 
     // Verify the JWT
     console.log('[B2B Transaction] Verifying JWT signature...');
-    const decoded = jwt.verify(jwt, generatedKeys.publicKey, { 
+    const decoded = jwt.verify(jwt, publicKey, { 
       algorithms: ['RS256']
     });
     
@@ -767,41 +835,6 @@ const centralBankService = {
       console.error(`[Central Bank] Error querying central bank for ${bankPrefix}:`, error);
       console.error(`[Central Bank] Error stack:`, error.stack);
       return null;
-    }
-  }
-};
-
-// Add key manager
-const keyManager = {
-  sign: (payload) => {
-    try {
-      if (!generatedKeys) {
-        throw new Error('RSA keys not generated');
-      }
-
-      // Create JWT with proper claims
-      const token = jwt.sign({
-        accountFrom: payload.accountFrom,
-        accountTo: payload.accountTo,
-        amount: payload.amount,
-        currency: payload.currency,
-        senderName: payload.senderName,
-        explanation: payload.explanation
-      }, generatedKeys.privateKey, {
-        algorithm: 'RS256',
-        keyid: process.env.JWT_SECRET,
-        header: {
-          alg: 'RS256',
-          kid: process.env.JWT_SECRET,
-          typ: 'JWT'
-        }
-      });
-
-      console.log('[JWT Sign] Generated token');
-      return token;
-    } catch (error) {
-      console.error('[JWT Sign] Error signing JWT:', error);
-      throw error;
     }
   }
 };
