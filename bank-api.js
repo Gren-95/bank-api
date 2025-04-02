@@ -701,25 +701,36 @@ const centralBankService = {
 // Add key manager
 const keyManager = {
   sign: (payload) => {
-    // Create JWT with proper claims
-    const token = jwt.sign({
-      accountFrom: payload.accountFrom,
-      accountTo: payload.accountTo,
-      currency: payload.currency,
-      amount: payload.amount,
-      explanation: payload.explanation,
-      senderName: payload.senderName,
-      originalCurrency: payload.originalCurrency,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (60 * 5), // 5 minutes expiry
-      iss: process.env.BANK_PREFIX || 'BANK',
-      aud: 'bank-api'
-    }, process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n') || 'your-private-key', {
-      algorithm: 'RS256',
-      keyid: '1'
-    });
+    try {
+      // Get the private key and ensure it's properly formatted
+      const privateKey = process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n');
+      if (!privateKey) {
+        throw new Error('JWT_PRIVATE_KEY environment variable is not set');
+      }
 
-    return token;
+      // Create JWT with proper claims
+      const token = jwt.sign({
+        accountFrom: payload.accountFrom,
+        accountTo: payload.accountTo,
+        currency: payload.currency,
+        amount: payload.amount,
+        explanation: payload.explanation,
+        senderName: payload.senderName,
+        originalCurrency: payload.originalCurrency,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + (60 * 5), // 5 minutes expiry
+        iss: process.env.BANK_PREFIX || 'BANK',
+        aud: 'bank-api'
+      }, privateKey, {
+        algorithm: 'RS256',
+        keyid: '1'
+      });
+
+      return token;
+    } catch (error) {
+      console.error('Error signing JWT:', error);
+      throw error;
+    }
   }
 };
 
