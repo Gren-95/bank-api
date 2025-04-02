@@ -745,8 +745,12 @@ app.post('/transfers/external', authenticate, [
   body('explanation').isString().trim().notEmpty()
 ], async (req, res) => {
   try {
+    console.log('Starting external transfer process...');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('Validation errors:', errors.array());
       return res.status(400).json({
         status: 'error',
         errors: errors.array()
@@ -754,16 +758,25 @@ app.post('/transfers/external', authenticate, [
     }
 
     const { fromAccount, toAccount, amount, explanation } = req.body;
+    console.log(`Processing transfer from ${fromAccount} to ${toAccount} for amount ${amount}`);
     
     const sourceAccount = dataStoreHelpers.findAccountByNumber(fromAccount);
     if (!sourceAccount) {
+      console.log(`Source account ${fromAccount} not found`);
       return res.status(404).json({
         status: 'error',
         message: 'Source account not found'
       });
     }
 
+    console.log('Source account details:', {
+      accountNumber: sourceAccount.account_number,
+      balance: sourceAccount.balance,
+      currency: sourceAccount.currency
+    });
+
     if (sourceAccount.user_id !== req.user.id) {
+      console.log(`Access forbidden: User ${req.user.id} does not own account ${fromAccount}`);
       return res.status(403).json({
         status: 'error',
         message: 'Access forbidden - not your account'
@@ -772,6 +785,7 @@ app.post('/transfers/external', authenticate, [
 
     // Check sufficient funds
     if (sourceAccount.balance < amount) {
+      console.log(`Insufficient funds: Required ${amount}, Available ${sourceAccount.balance}`);
       return res.status(402).json({
         status: 'error',
         message: 'Insufficient funds'
@@ -780,9 +794,11 @@ app.post('/transfers/external', authenticate, [
 
     // Extract the bank prefix from toAccount (first 3 characters)
     const bankPrefix = toAccount.substring(0, 3);
+    console.log(`Extracted bank prefix: ${bankPrefix}`);
     
     // Check if this is actually an external transaction
     if (bankPrefix === process.env.BANK_PREFIX) {
+      console.log('Internal transfer detected, redirecting to internal endpoint');
       return res.status(400).json({
         status: 'error',
         message: 'For internal transfers please use /internal endpoint'
@@ -790,6 +806,7 @@ app.post('/transfers/external', authenticate, [
     }
 
     // Create initial transaction record with pending status
+    console.log('Creating pending transaction record...');
     const transaction = dataStoreHelpers.createTransaction({
       from_account: fromAccount,
       to_account: toAccount,
@@ -801,6 +818,7 @@ app.post('/transfers/external', authenticate, [
       is_external: true,
       status: 'pending'
     });
+    console.log('Created transaction:', JSON.stringify(transaction, null, 2));
 
     try {
       console.log(`Looking up bank with prefix: ${bankPrefix}`);
@@ -809,16 +827,18 @@ app.post('/transfers/external', authenticate, [
       const bankDetails = await centralBankService.getBankDetails(bankPrefix);
       
       if (!bankDetails) {
+        console.error(`No bank found with prefix ${bankPrefix}`);
         // Update transaction status to failed
         transaction.status = 'failed';
         transaction.explanation = explanation + ' (Destination bank not found)';
         
-        console.error(`No bank found with prefix ${bankPrefix}`);
         return res.status(404).json({
           status: 'error',
           message: 'Destination bank not found'
         });
       }
+
+      console.log('Bank details retrieved:', JSON.stringify(bankDetails, null, 2));
 
       // Prepare payload for B2B transaction
       const payload = {
@@ -830,9 +850,12 @@ app.post('/transfers/external', authenticate, [
         senderName: req.user.full_name || 'User',
         originalCurrency: sourceAccount.currency
       };
+      console.log('Prepared payload:', JSON.stringify(payload, null, 2));
 
       // Sign the payload with our private key
+      console.log('Signing JWT...');
       const jwtToken = keyManager.sign(payload);
+      console.log('JWT signed successfully');
       
       console.log(`Sending transaction to ${bankDetails.transactionUrl}`);
       
@@ -843,9 +866,14 @@ app.post('/transfers/external', authenticate, [
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
+          console.log(`Attempt ${attempt} of ${maxRetries}`);
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+          const timeoutId = setTimeout(() => {
+            console.log(`Request timeout after 10 seconds on attempt ${attempt}`);
+            controller.abort();
+          }, 10000); // 10 second timeout
 
+          console.log('Sending request to destination bank...');
           const response = await fetch(bankDetails.transactionUrl, {
             method: 'POST',
             headers: {
@@ -857,6 +885,8 @@ app.post('/transfers/external', authenticate, [
           });
 
           clearTimeout(timeoutId);
+          console.log(`Response status: ${response.status}`);
+          console.log('Response headers:', JSON.stringify(Object.fromEntries(response.headers.entries()), null, 2));
 
           if (!response.ok) {
             const errorText = await response.text();
@@ -872,7 +902,7 @@ app.post('/transfers/external', authenticate, [
           }
 
           const result = await response.json();
-          console.log(`Transaction successful:`, result);
+          console.log(`Transaction successful:`, JSON.stringify(result, null, 2));
           
           // Update transaction with receiver name and status
           transaction.status = 'completed';
@@ -881,6 +911,7 @@ app.post('/transfers/external', authenticate, [
           }
 
           // Update source account balance
+          console.log(`Updating source account balance: ${fromAccount} -${amount}`);
           dataStoreHelpers.updateAccountBalance(fromAccount, -amount);
 
           // Format response data
@@ -898,12 +929,14 @@ app.post('/transfers/external', authenticate, [
             isExternal: true
           };
 
+          console.log('Sending success response:', JSON.stringify(transactionData, null, 2));
           return res.status(201).json({
             status: 'success',
             data: transactionData
           });
 
         } catch (error) {
+          console.error(`Error on attempt ${attempt}:`, error);
           lastError = error;
           if (error.name === 'AbortError' && attempt < maxRetries) {
             console.log(`Attempt ${attempt} timed out, retrying in ${retryDelay/1000} seconds...`);
@@ -915,11 +948,13 @@ app.post('/transfers/external', authenticate, [
       }
 
       // If we get here, all retries failed
+      console.error('All retry attempts failed:', lastError);
       throw lastError;
 
     } catch (error) {
       // Transaction failed
       console.error('External transfer error:', error);
+      console.error('Error stack:', error.stack);
       
       // Update transaction as failed
       transaction.status = 'failed';
@@ -932,6 +967,7 @@ app.post('/transfers/external', authenticate, [
     }
   } catch (error) {
     console.error('Error creating external transaction:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       status: 'error',
       message: 'Error creating external transaction'
