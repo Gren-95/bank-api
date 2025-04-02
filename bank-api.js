@@ -769,12 +769,18 @@ const keyManager = {
         aud: 'bank-api'
       }, privateKey, {
         algorithm: 'RS256',
-        keyid: '1'
+        keyid: '1',
+        header: {
+          alg: 'RS256',
+          kid: '1',
+          typ: 'JWT'
+        }
       });
 
+      console.log('[JWT Sign] Generated token:', token);
       return token;
     } catch (error) {
-      console.error('Error signing JWT:', error);
+      console.error('[JWT Sign] Error signing JWT:', error);
       throw error;
     }
   }
@@ -897,7 +903,6 @@ app.post('/transfers/external', authenticate, [
       // Sign the payload with our private key
       console.log('[External Transfer] Signing JWT...');
       const jwtToken = keyManager.sign(payload);
-      console.log('[External Transfer] JWT:', jwtToken);
       console.log('[External Transfer] JWT signed successfully');
       
       console.log(`[External Transfer] Sending transaction to ${bankDetails.transactionUrl}`);
@@ -916,6 +921,12 @@ app.post('/transfers/external', authenticate, [
             controller.abort();
           }, 30000); // 30 second timeout
 
+          // Prepare the request body exactly as shown in the example
+          const requestBody = {
+            jwt: jwtToken
+          };
+          console.log('[External Transfer] Request body:', JSON.stringify(requestBody, null, 2));
+
           console.log('[External Transfer] Sending request to destination bank...');
           console.log('[External Transfer] Request details:', {
             url: bankDetails.transactionUrl,
@@ -932,7 +943,7 @@ app.post('/transfers/external', authenticate, [
               'Content-Type': 'application/json',
               'Accept': 'application/json'
             },
-            body: JSON.stringify({ jwt: jwtToken }),
+            body: JSON.stringify(requestBody),
             signal: controller.signal,
             timeout: 30000,
             keepalive: true,
