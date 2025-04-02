@@ -679,11 +679,16 @@ const processB2BTransaction = async (jwtToken) => {
     console.log('[B2B Transaction] Retrieved JWKS:', JSON.stringify(jwks, null, 2));
 
     // Find the matching key
-    const key = jwks.keys.find(k => k.kid === header.kid);
+    const key = header.kid 
+      ? jwks.keys.find(k => k.kid === header.kid)
+      : jwks.keys[0]; // Use the first key if no kid is specified
+
     if (!key) {
-      console.error(`[B2B Transaction] No matching key found for kid: ${header.kid}`);
-      throw new Error('No matching key found in JWKS');
+      console.error(`[B2B Transaction] No key found in JWKS`);
+      throw new Error('No key found in JWKS');
     }
+
+    console.log(`[B2B Transaction] Using key with kid: ${key.kid}`);
 
     // Convert JWK to PEM format
     const publicKey = crypto.createPublicKey({
