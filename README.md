@@ -89,6 +89,7 @@ sudo systemctl start bank-api
 ```
 
 Check the service status:
+
 ```bash
 sudo systemctl status bank-api
 ```
@@ -159,33 +160,3 @@ The API implements detailed logging for:
 - Rate limiting
 - Input validation
 - Secure password handling
-
-## Development
-
-### Project Structure
-
-```
-bank-api/
-├── bank-api.js      # Main application file
-├── SPECIFICATIONS.md # API specifications
-├── package.json     # Dependencies and scripts
-└── .env            # Environment variables
-```
-
-### Running Tests
-
-```bash
-npm test
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a new Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
