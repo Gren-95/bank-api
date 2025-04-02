@@ -647,13 +647,13 @@ app.get('/health', (req, res) => {
 });
 
 // Bank-to-Bank transaction processing
-const processB2BTransaction = async (jwt) => {
+const processB2BTransaction = async (jwtToken) => {
   try {
     console.log('[B2B Transaction] Starting JWT verification...');
 
     // Verify the JWT
     console.log('[B2B Transaction] Verifying JWT signature...');
-    const decoded = jwt.verify(jwt, publicKey, { 
+    const decoded = jwt.verify(jwtToken, publicKey, { 
       algorithms: ['RS256']
     });
     
