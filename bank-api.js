@@ -707,13 +707,13 @@ const processB2BTransaction = async (jwtToken) => {
     
     console.log('[B2B Transaction] JWT verified successfully. Decoded payload:', JSON.stringify(decoded, null, 2));
 
-    const { toAccount, amount, currency, senderName, explanation } = decoded;
-    console.log(`[B2B Transaction] Processing transfer from ${fromAccount} to ${toAccount} for amount ${amount} ${currency}`);
+    const { accountTo, amount, currency, senderName, explanation } = decoded;
+    console.log(`[B2B Transaction] Processing transfer from ${fromAccount} to ${accountTo} for amount ${amount} ${currency}`);
 
     // Find the destination account
-    const targetAccount = dataStoreHelpers.findAccountByNumber(toAccount);
+    const targetAccount = dataStoreHelpers.findAccountByNumber(accountTo);
     if (!targetAccount) {
-      console.error(`[B2B Transaction] Destination account ${toAccount} not found`);
+      console.error(`[B2B Transaction] Destination account ${accountTo} not found`);
       throw new Error('Destination account not found');
     }
 
@@ -734,7 +734,7 @@ const processB2BTransaction = async (jwtToken) => {
     console.log('[B2B Transaction] Creating transaction record...');
     const transaction = dataStoreHelpers.createTransaction({
       from_account: fromAccount,
-      to_account: toAccount,
+      to_account: accountTo,
       amount: finalAmount,
       currency: targetAccount.currency,
       explanation: explanation || `External transfer from ${senderName}`,
@@ -745,8 +745,8 @@ const processB2BTransaction = async (jwtToken) => {
     });
 
     // Update account balance
-    console.log(`[B2B Transaction] Updating account balance for ${toAccount} with ${finalAmount}`);
-    dataStoreHelpers.updateAccountBalance(toAccount, finalAmount);
+    console.log(`[B2B Transaction] Updating account balance for ${accountTo} with ${finalAmount}`);
+    dataStoreHelpers.updateAccountBalance(accountTo, finalAmount);
 
     console.log('[B2B Transaction] Transaction completed successfully');
     return {
