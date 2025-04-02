@@ -78,7 +78,7 @@ const dataStoreHelpers = {
   // Transaction helpers
   createTransaction: (transactionData) => {
     const transaction = {
-      id: dataStore.transactions.length + 1,
+      id: dataStore.nextTransactionId++,
       from_account: transactionData.from_account,
       to_account: transactionData.to_account,
       amount: transactionData.amount,
@@ -666,11 +666,47 @@ app.post('/transfers/incoming', async (req, res) => {
   }
 });
 
+// Add central bank service
+const centralBankService = {
+  getBankDetails: async (bankPrefix) => {
+    try {
+      // In real implementation, this would query the central bank's API
+      const response = await fetch(`${process.env.CENTRAL_BANK_URL || 'http://central-bank.example.com'}/api/v1/banks/${bankPrefix}`);
+      
+      if (!response.ok) {
+        console.error(`Failed to get bank details for prefix: ${bankPrefix}`);
+        return null;
+      }
+
+      const bankDetails = await response.json();
+      
+      if (!bankDetails || bankDetails.status !== 'active') {
+        console.error(`Bank ${bankPrefix} is not active or not found`);
+        return null;
+      }
+
+      console.log(`Found bank: ${bankDetails.name} (${bankDetails.bankPrefix})`);
+      console.log(`Transaction URL: ${bankDetails.transactionUrl}`);
+      return bankDetails;
+    } catch (error) {
+      console.error(`Error querying central bank for ${bankPrefix}:`, error);
+      return null;
+    }
+  }
+};
+
+// Add key manager simulation
+const keyManager = {
+  sign: (payload) => {
+    // In real implementation, this would use proper JWT signing with private key
+    return jwt.sign(payload, process.env.JWT_SECRET || 'your-secret-key');
+  }
+};
+
 app.post('/transfers/external', authenticate, [
   body('fromAccount').isString(),
   body('toAccount').isString(),
   body('amount').isFloat({ min: 0 }),
-  body('currency').isIn(['EUR', 'USD', 'GBP', 'SEK']),
   body('explanation').isString().trim().notEmpty()
 ], async (req, res) => {
   try {
@@ -682,7 +718,7 @@ app.post('/transfers/external', authenticate, [
       });
     }
 
-    const { fromAccount, toAccount, amount, currency, explanation } = req.body;
+    const { fromAccount, toAccount, amount, explanation } = req.body;
     
     const sourceAccount = dataStoreHelpers.findAccountByNumber(fromAccount);
     if (!sourceAccount) {
@@ -699,88 +735,142 @@ app.post('/transfers/external', authenticate, [
       });
     }
 
-    // Calculate final amount with currency conversion if needed
-    let debitAmount = amount;
-    if (sourceAccount.currency !== currency) {
-      try {
-        // Convert source amount to EUR first
-        let amountInEUR = amount;
-        if (currency === 'EUR') {
-          amountInEUR = amount; // Already in EUR
-        } else {
-          if (!exchangeRates[currency] || !exchangeRates[currency]['EUR']) {
-            return res.status(400).json({
-              status: 'error',
-              message: `Unsupported currency conversion from ${currency} to EUR`
-            });
-          }
-          amountInEUR = amount * exchangeRates[currency]['EUR'];
-        }
-
-        // Then convert EUR to source account currency
-        if (sourceAccount.currency === 'EUR') {
-          debitAmount = amountInEUR; // Keep in EUR
-        } else {
-          if (!exchangeRates['EUR'] || !exchangeRates['EUR'][sourceAccount.currency]) {
-            return res.status(400).json({
-              status: 'error',
-              message: `Unsupported currency conversion from EUR to ${sourceAccount.currency}`
-            });
-          }
-          debitAmount = amountInEUR * exchangeRates['EUR'][sourceAccount.currency];
-        }
-      } catch (conversionError) {
-        console.error('Currency conversion error:', conversionError);
-        return res.status(400).json({
-          status: 'error',
-          message: 'Error during currency conversion'
-        });
-      }
-    }
-
-    // Check sufficient funds using amount in source account's currency
-    if (sourceAccount.balance < debitAmount) {
+    // Check sufficient funds
+    if (sourceAccount.balance < amount) {
       return res.status(402).json({
         status: 'error',
         message: 'Insufficient funds'
       });
     }
 
-    // Create transaction record
+    // Extract the bank prefix from toAccount (first 3 characters)
+    const bankPrefix = toAccount.substring(0, 3);
+    
+    // Check if this is actually an external transaction
+    if (bankPrefix === process.env.BANK_PREFIX) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'For internal transfers please use /internal endpoint'
+      });
+    }
+
+    // Create initial transaction record with pending status
     const transaction = dataStoreHelpers.createTransaction({
       from_account: fromAccount,
       to_account: toAccount,
-      amount: debitAmount,
+      amount,
       currency: sourceAccount.currency,
       explanation,
       sender_name: req.user.full_name || 'User',
       receiver_name: 'External Account',
       is_external: true,
-      exchanged_amount: amount,
-      exchanged_currency: currency
+      status: 'pending'
     });
 
-    if (!transaction) {
-      throw new Error('Failed to create transaction record');
-    }
+    try {
+      console.log(`Looking up bank with prefix: ${bankPrefix}`);
+      
+      // Get destination bank details from central bank
+      const bankDetails = await centralBankService.getBankDetails(bankPrefix);
+      
+      if (!bankDetails) {
+        // Update transaction status to failed
+        transaction.status = 'failed';
+        transaction.explanation = explanation + ' (Destination bank not found)';
+        
+        console.error(`No bank found with prefix ${bankPrefix}`);
+        return res.status(404).json({
+          status: 'error',
+          message: 'Destination bank not found'
+        });
+      }
 
-    // Update source account balance
-    const balanceUpdated = dataStoreHelpers.updateAccountBalance(fromAccount, -debitAmount);
-    if (!balanceUpdated) {
-      throw new Error('Failed to update account balance');
-    }
+      // Prepare payload for B2B transaction
+      const payload = {
+        accountFrom: fromAccount,
+        accountTo: toAccount,
+        currency: sourceAccount.currency,
+        amount,
+        explanation,
+        senderName: req.user.full_name || 'User',
+        originalCurrency: sourceAccount.currency
+      };
 
-    res.status(201).json({
-      status: 'success',
-      data: transaction,
-      message: 'External transfer initiated successfully'
-    });
+      // Sign the payload with our private key
+      const jwtToken = keyManager.sign(payload);
+      
+      console.log(`Sending transaction to ${bankDetails.transactionUrl}`);
+      
+      // Send to destination bank's B2B endpoint
+      const response = await fetch(bankDetails.transactionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ jwt: jwtToken })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Destination bank responded with error: ${response.status}`, errorText);
+        
+        // Update transaction as failed
+        transaction.status = 'failed';
+        transaction.explanation = explanation + ` (Error: ${response.status})`;
+        
+        throw new Error(`Destination bank responded with status: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log(`Transaction successful:`, result);
+      
+      // Update transaction with receiver name and status
+      transaction.status = 'completed';
+      if (result && result.receiverName) {
+        transaction.receiver_name = result.receiverName;
+      }
+
+      // Update source account balance
+      dataStoreHelpers.updateAccountBalance(fromAccount, -amount);
+
+      // Format response data
+      const transactionData = {
+        id: transaction.id,
+        fromAccount: transaction.from_account,
+        toAccount: transaction.to_account,
+        amount: parseFloat(transaction.amount),
+        currency: transaction.currency,
+        explanation: transaction.explanation,
+        senderName: transaction.sender_name,
+        receiverName: transaction.receiver_name,
+        status: transaction.status,
+        createdAt: transaction.created_at,
+        isExternal: true
+      };
+
+      res.status(201).json({
+        status: 'success',
+        data: transactionData
+      });
+    } catch (error) {
+      // Transaction failed
+      console.error('External transfer error:', error);
+      
+      // Update transaction as failed
+      transaction.status = 'failed';
+      transaction.explanation = explanation + ` (Error: ${error.message})`;
+      
+      res.status(500).json({
+        status: 'error',
+        message: `External transfer failed: ${error.message}`
+      });
+    }
   } catch (error) {
-    console.error('External transfer error:', error);
+    console.error('Error creating external transaction:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Server error processing external transfer',
-      details: error.message
+      message: 'Error creating external transaction'
     });
   }
 });
