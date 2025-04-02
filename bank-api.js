@@ -548,16 +548,18 @@ const processB2BTransaction = async (jwt) => {
   try {
     console.log('[B2B Transaction] Starting JWT verification...');
     
-    // Get the secret key from environment
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      console.error('[B2B Transaction] JWT_SECRET environment variable is not set');
-      throw new Error('JWT_SECRET environment variable is not set');
+    // Get the public key from environment
+    const publicKey = process.env.JWT_PUBLIC_KEY?.replace(/\\n/g, '\n');
+    if (!publicKey) {
+      console.error('[B2B Transaction] JWT_PUBLIC_KEY environment variable is not set');
+      throw new Error('JWT_PUBLIC_KEY environment variable is not set');
     }
 
     // Verify the JWT
     console.log('[B2B Transaction] Verifying JWT signature...');
-    const decoded = jwt.verify(jwt, secret);
+    const decoded = jwt.verify(jwt, publicKey, { 
+      algorithms: ['RS256']
+    });
     
     console.log('[B2B Transaction] JWT verified successfully. Decoded payload:', JSON.stringify(decoded, null, 2));
 
@@ -745,10 +747,10 @@ const centralBankService = {
 const keyManager = {
   sign: (payload) => {
     try {
-      // Get the secret key from environment
-      const secret = process.env.JWT_SECRET;
-      if (!secret) {
-        throw new Error('JWT_SECRET environment variable is not set');
+      // Get the private key and ensure it's properly formatted
+      const privateKey = process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n');
+      if (!privateKey) {
+        throw new Error('JWT_PRIVATE_KEY environment variable is not set');
       }
 
       // Create JWT with proper claims
@@ -759,10 +761,12 @@ const keyManager = {
         currency: payload.currency,
         senderName: payload.senderName,
         explanation: payload.explanation
-      }, secret, {
-        algorithm: 'HS256',
+      }, privateKey, {
+        algorithm: 'RS256',
+        keyid: 'a901058d-d100-4aa4-9297-8e2074428af7',
         header: {
-          alg: 'HS256',
+          alg: 'RS256',
+          kid: 'a901058d-d100-4aa4-9297-8e2074428af7',
           typ: 'JWT'
         }
       });
