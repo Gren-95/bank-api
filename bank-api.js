@@ -552,7 +552,7 @@ const processB2BTransaction = async (jwt) => {
     }
 
     const decoded = jwt.verify(jwt, publicKey, { algorithms: ['RS256'] });
-    const { toAccount, amount, currency, senderName } = decoded;
+    const { toAccount, fromAccount, amount, currency, senderName, explanation } = decoded;
 
     const targetAccount = dataStoreHelpers.findAccountById(toAccount);
     if (!targetAccount) {
@@ -571,11 +571,11 @@ const processB2BTransaction = async (jwt) => {
 
     // Create and process the transaction
     const transaction = dataStoreHelpers.createTransaction({
-      from_account: 'EXTERNAL',
+      from_account: fromAccount,
       to_account: toAccount,
       amount: finalAmount,
       currency: targetAccount.currency,
-      explanation: `External transfer from ${senderName}`,
+      explanation: explanation || `External transfer from ${senderName}`,
       sender_name: senderName,
       receiver_name: targetAccount.name,
       is_external: true
@@ -715,13 +715,12 @@ const keyManager = {
 
       // Create JWT with proper claims
       const token = jwt.sign({
-        accountFrom: payload.accountFrom,
-        accountTo: payload.accountTo,
-        currency: payload.currency,
+        toAccount: payload.accountTo,
+        fromAccount: payload.accountFrom,
         amount: payload.amount,
-        explanation: payload.explanation,
+        currency: payload.currency,
         senderName: payload.senderName,
-        originalCurrency: payload.originalCurrency,
+        explanation: payload.explanation,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + (60 * 5), // 5 minutes expiry
         iss: process.env.BANK_PREFIX || 'BANK',
