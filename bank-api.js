@@ -87,7 +87,7 @@ const dataStoreHelpers = {
       sender_name: transactionData.sender_name,
       receiver_name: transactionData.receiver_name,
       is_external: transactionData.is_external || false,
-      status: 'COMPLETED',
+      status: transactionData.status || 'pending',
       created_at: new Date().toISOString(),
       exchanged_amount: transactionData.exchanged_amount,
       exchanged_currency: transactionData.exchanged_currency
