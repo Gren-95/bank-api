@@ -851,8 +851,8 @@ app.post('/transfers/external', authenticate, [
 
       // Prepare payload for B2B transaction - simplified like Brigita Bank
       const payload = {
-        accountFrom,
-        accountTo,
+        accountFrom: fromAccount,
+        accountTo: toAccount,
         amount: parseFloat(amount),
         currency: sourceAccount.currency,
         explanation,
