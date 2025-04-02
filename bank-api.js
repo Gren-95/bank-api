@@ -897,6 +897,7 @@ app.post('/transfers/external', authenticate, [
       // Sign the payload with our private key
       console.log('[External Transfer] Signing JWT...');
       const jwtToken = keyManager.sign(payload);
+      console.log('[External Transfer] JWT:', jwtToken);
       console.log('[External Transfer] JWT signed successfully');
       
       console.log(`[External Transfer] Sending transaction to ${bankDetails.transactionUrl}`);
