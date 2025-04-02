@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Load OpenAPI specification
 const swaggerSpec = YAML.load(path.join(__dirname, './openapi.yaml'));
@@ -176,6 +177,36 @@ const authenticate = async (req, res, next) => {
   }
 };
 
+// Generate RSA key pair from secret at startup
+let generatedKeys = null;
+try {
+  console.log('[Key Generation] Generating RSA key pair from JWT_SECRET...');
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is not set');
+  }
+
+  // Use the secret as a seed for key generation
+  const seed = crypto.createHash('sha256').update(secret).digest();
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: {
+      type: 'spki',
+      format: 'pem'
+    },
+    privateKeyEncoding: {
+      type: 'pkcs8',
+      format: 'pem'
+    }
+  });
+
+  generatedKeys = { privateKey, publicKey };
+  console.log('[Key Generation] Successfully generated RSA key pair');
+} catch (error) {
+  console.error('[Key Generation] Error generating keys:', error);
+  process.exit(1);
+}
+
 // JWT Key Management
 const jwtKeys = {
   keys: [
@@ -184,7 +215,7 @@ const jwtKeys = {
       kid: 'a901058d-d100-4aa4-9297-8e2074428af7',
       use: 'sig',
       alg: 'RS256',
-      n: 'ua3q_qH75Ey85J7LPo027fXkIEiBh5lehp5PqxR22hspQNOvequLbATo9citWc4q9MiplS7mUGiqv4aXw-Z_wZYfy3D2hKFG639ZHlr09t1s03u-UilRQisMcariQA-LOCC8ah7GK_2Qrd-SrssuWmZ3l65XG6h99z12tPL3QH5hoB40ZCj4mTo6-rX7zY0RcdPLyJqqbqqQAf-40f4IxbN4qBs_M3mJLpfFwOTNCIzk7b7x2IgSK4iCZ_Eeulw_xBTxwqLTQBaCh51okxaZIUZ1dF2SxcqioA9WjIGLg_AV4KyIsSWLfnuLdgBSA9hrvfCCIMjm_E9ecczWWgljsQIDAQAB',
+      n: generatedKeys.publicKey.split('\n')[1],
       e: 'AQAB'
     }
   ]
@@ -548,16 +579,13 @@ const processB2BTransaction = async (jwt) => {
   try {
     console.log('[B2B Transaction] Starting JWT verification...');
     
-    // Get the public key from environment
-    const publicKey = process.env.JWT_PUBLIC_KEY?.replace(/\\n/g, '\n');
-    if (!publicKey) {
-      console.error('[B2B Transaction] JWT_PUBLIC_KEY environment variable is not set');
-      throw new Error('JWT_PUBLIC_KEY environment variable is not set');
+    if (!generatedKeys) {
+      throw new Error('RSA keys not generated');
     }
 
     // Verify the JWT
     console.log('[B2B Transaction] Verifying JWT signature...');
-    const decoded = jwt.verify(jwt, publicKey, { 
+    const decoded = jwt.verify(jwt, generatedKeys.publicKey, { 
       algorithms: ['RS256']
     });
     
@@ -747,10 +775,8 @@ const centralBankService = {
 const keyManager = {
   sign: (payload) => {
     try {
-      // Get the private key and ensure it's properly formatted
-      const privateKey = process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n');
-      if (!privateKey) {
-        throw new Error('JWT_PRIVATE_KEY environment variable is not set');
+      if (!generatedKeys) {
+        throw new Error('RSA keys not generated');
       }
 
       // Create JWT with proper claims
@@ -761,7 +787,7 @@ const keyManager = {
         currency: payload.currency,
         senderName: payload.senderName,
         explanation: payload.explanation
-      }, privateKey, {
+      }, generatedKeys.privateKey, {
         algorithm: 'RS256',
         keyid: 'a901058d-d100-4aa4-9297-8e2074428af7',
         header: {
