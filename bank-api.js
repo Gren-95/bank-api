@@ -651,7 +651,50 @@ const processB2BTransaction = async (jwtToken) => {
   try {
     console.log('[B2B Transaction] Starting JWT verification...');
 
-    // Verify the JWT
+    // Decode the JWT header to get the key ID
+    const header = JSON.parse(Buffer.from(jwtToken.split('.')[0], 'base64').toString());
+    console.log('[B2B Transaction] JWT Header:', header);
+
+    // Extract the bank prefix from the fromAccount in the JWT payload
+    const payload = JSON.parse(Buffer.from(jwtToken.split('.')[1], 'base64').toString());
+    const fromAccount = payload.accountFrom;
+    const bankPrefix = fromAccount.substring(0, 3);
+    console.log(`[B2B Transaction] Extracted bank prefix: ${bankPrefix}`);
+
+    // Get the sender's bank details from central bank
+    const bankDetails = await centralBankService.getBankDetails(bankPrefix);
+    if (!bankDetails) {
+      console.error(`[B2B Transaction] Sender's bank ${bankPrefix} not found in central bank registry`);
+      throw new Error('Sender bank not found');
+    }
+
+    // Fetch the JWKS from the sender's bank
+    console.log(`[B2B Transaction] Fetching JWKS from ${bankDetails.jwksUrl}`);
+    const jwksResponse = await fetch(bankDetails.jwksUrl);
+    if (!jwksResponse.ok) {
+      console.error(`[B2B Transaction] Failed to fetch JWKS: ${jwksResponse.status}`);
+      throw new Error('Failed to fetch sender bank JWKS');
+    }
+    const jwks = await jwksResponse.json();
+    console.log('[B2B Transaction] Retrieved JWKS:', JSON.stringify(jwks, null, 2));
+
+    // Find the matching key
+    const key = jwks.keys.find(k => k.kid === header.kid);
+    if (!key) {
+      console.error(`[B2B Transaction] No matching key found for kid: ${header.kid}`);
+      throw new Error('No matching key found in JWKS');
+    }
+
+    // Convert JWK to PEM format
+    const publicKey = crypto.createPublicKey({
+      key: key,
+      format: 'jwk'
+    }).export({
+      type: 'spki',
+      format: 'pem'
+    });
+
+    // Verify the JWT with the sender's public key
     console.log('[B2B Transaction] Verifying JWT signature...');
     const decoded = jwt.verify(jwtToken, publicKey, { 
       algorithms: ['RS256']
@@ -659,7 +702,7 @@ const processB2BTransaction = async (jwtToken) => {
     
     console.log('[B2B Transaction] JWT verified successfully. Decoded payload:', JSON.stringify(decoded, null, 2));
 
-    const { toAccount, fromAccount, amount, currency, senderName, explanation } = decoded;
+    const { toAccount, amount, currency, senderName, explanation } = decoded;
     console.log(`[B2B Transaction] Processing transfer from ${fromAccount} to ${toAccount} for amount ${amount} ${currency}`);
 
     // Find the destination account
