@@ -55,6 +55,13 @@ git clone https://github.com/Gren-95/bank-api
 cd bank-api
 ```
 
+1. Cope example env to production
+
+```bash
+cp .env.example .env
+```
+
+
 1. Start the server (dependencies are installed at start):
 
 ```bash

@@ -545,47 +545,6 @@ paths:
         '401':
           $ref: '#/components/responses/UnauthorizedError'
 
-  /transfers/incoming:
-    post:
-      summary: Process incoming transfer
-      tags: [Bank-to-Bank]
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - jwt
-              properties:
-                jwt:
-                  type: string
-                  example: eyJhbGciOiJSUzI1NiIsImtpZCI6IjEiLCJ0eXAiOiJKV1QifQ...
-      responses:
-        '200':
-          description: Transaction processed successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: success
-                  receiverName:
-                    type: string
-                    example: John Doe
-                  transactionId:
-                    type: integer
-                    example: 42
-        '400':
-          description: Invalid JWT or signature
-        '404':
-          description: Destination account not found
-        '500':
-          description: Processing error
-
   /transactions/b2b:
     post:
       summary: Process incoming transfer (Bank-to-Bank)

@@ -472,12 +472,32 @@ app.get('/accounts', authenticate, async (req, res) => {
 });
 
 app.post('/transfers/internal', authenticate, [
-  body('fromAccount').isString(),
-  body('toAccount').isString(),
-  body('amount').isFloat({ min: 0 }),
+  body('fromAccount').isString().trim().notEmpty(),
+  body('toAccount').isString().trim().notEmpty(),
+  body('amount').isFloat({ min: 0.01 }).toFloat(),
   body('explanation').isString().trim().notEmpty()
 ], async (req, res) => {
   try {
+    // Check for extra fields
+    const allowedFields = ['fromAccount', 'toAccount', 'amount', 'explanation'];
+    const extraFields = Object.keys(req.body).filter(field => !allowedFields.includes(field));
+    if (extraFields.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid request body',
+        details: `Unexpected fields: ${extraFields.join(', ')}`
+      });
+    }
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
     const { fromAccount, toAccount, amount, explanation } = req.body;
     
     // Find source and destination accounts
@@ -773,6 +793,17 @@ const processB2BTransaction = async (jwtToken) => {
 // Routes
 app.post('/transactions/b2b', async (req, res) => {
   try {
+    // Check for extra fields
+    const allowedFields = ['jwt'];
+    const extraFields = Object.keys(req.body).filter(field => !allowedFields.includes(field));
+    if (extraFields.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid request body',
+        details: `Unexpected fields: ${extraFields.join(', ')}`
+      });
+    }
+
     const { jwt } = req.body;
     if (!jwt) {
       return res.status(400).json({
@@ -802,42 +833,10 @@ app.post('/transactions/b2b', async (req, res) => {
         message: 'Invalid JWT or signature'
       });
     }
-    res.status(500).json({
-      status: 'error',
-      message: 'Error processing transaction'
-    });
-  }
-});
-
-app.post('/transfers/incoming', async (req, res) => {
-  try {
-    const { jwt } = req.body;
-    if (!jwt) {
-      return res.status(400).json({
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
         status: 'error',
-        message: 'JWT is required'
-      });
-    }
-
-    const result = await processB2BTransaction(jwt);
-    res.json(result);
-  } catch (error) {
-    if (error.message === 'Destination account not found') {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Destination account not found'
-      });
-    }
-    if (error.message === 'Unsupported currency conversion') {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Unsupported currency conversion'
-      });
-    }
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Invalid JWT or signature'
+        message: 'JWT has expired'
       });
     }
     res.status(500).json({
@@ -888,53 +887,50 @@ const centralBankService = {
 };
 
 app.post('/transfers/external', authenticate, [
-  body('fromAccount').isString(),
-  body('toAccount').isString(),
-  body('amount').isFloat({ min: 0 }),
+  body('fromAccount').isString().trim().notEmpty(),
+  body('toAccount').isString().trim().notEmpty(),
+  body('amount').isFloat({ min: 0.01 }).toFloat(),
   body('explanation').isString().trim().notEmpty()
 ], async (req, res) => {
   try {
-    console.log('\n[External Transfer] Starting external transfer process...');
-    console.log('[External Transfer] Request body:', JSON.stringify(req.body, null, 2));
+    // Check for extra fields
+    const allowedFields = ['fromAccount', 'toAccount', 'amount', 'explanation'];
+    const extraFields = Object.keys(req.body).filter(field => !allowedFields.includes(field));
+    if (extraFields.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid request body',
+        details: `Unexpected fields: ${extraFields.join(', ')}`
+      });
+    }
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      console.log('[External Transfer] Validation errors:', errors.array());
       return res.status(400).json({
         status: 'error',
+        message: 'Validation failed',
         errors: errors.array()
       });
     }
 
     const { fromAccount, toAccount, amount, explanation } = req.body;
-    console.log(`[External Transfer] Processing transfer from ${fromAccount} to ${toAccount} for amount ${amount}`);
     
     const sourceAccount = dataStoreHelpers.findAccountByNumber(fromAccount);
     if (!sourceAccount) {
-      console.log(`[External Transfer] Source account ${fromAccount} not found`);
       return res.status(404).json({
         status: 'error',
         message: 'Source account not found'
       });
     }
 
-    console.log('[External Transfer] Source account details:', {
-      accountNumber: sourceAccount.account_number,
-      balance: sourceAccount.balance,
-      currency: sourceAccount.currency
-    });
-
     if (sourceAccount.user_id !== req.user.id) {
-      console.log(`[External Transfer] Access forbidden: User ${req.user.id} does not own account ${fromAccount}`);
       return res.status(403).json({
         status: 'error',
         message: 'Access forbidden - not your account'
       });
     }
 
-    // Check sufficient funds
     if (sourceAccount.balance < amount) {
-      console.log(`[External Transfer] Insufficient funds: Required ${amount}, Available ${sourceAccount.balance}`);
       return res.status(402).json({
         status: 'error',
         message: 'Insufficient funds'
@@ -943,11 +939,9 @@ app.post('/transfers/external', authenticate, [
 
     // Extract the bank prefix from toAccount (first 3 characters)
     const bankPrefix = toAccount.substring(0, 3);
-    console.log(`[External Transfer] Extracted bank prefix: ${bankPrefix}`);
     
     // Check if this is actually an external transaction
     if (bankPrefix === process.env.BANK_PREFIX) {
-      console.log('[External Transfer] Internal transfer detected, redirecting to internal endpoint');
       return res.status(400).json({
         status: 'error',
         message: 'For internal transfers please use /internal endpoint'
@@ -955,7 +949,6 @@ app.post('/transfers/external', authenticate, [
     }
 
     // Create initial transaction record with pending status
-    console.log('[External Transfer] Creating pending transaction record...');
     const transaction = dataStoreHelpers.createTransaction({
       from_account: fromAccount,
       to_account: toAccount,
@@ -968,16 +961,12 @@ app.post('/transfers/external', authenticate, [
       status: 'pending',
       type: 'outgoing'
     });
-    console.log('[External Transfer] Created transaction:', JSON.stringify(transaction, null, 2));
 
     try {
-      console.log(`[External Transfer] Looking up bank with prefix: ${bankPrefix}`);
-      
       // Get destination bank details from central bank
       const bankDetails = await centralBankService.getBankDetails(bankPrefix);
       
       if (!bankDetails) {
-        console.error(`[External Transfer] No bank found with prefix ${bankPrefix}`);
         // Update transaction status to failed
         transaction.status = 'failed';
         transaction.explanation = explanation + ' (Destination bank not found)';
@@ -988,9 +977,7 @@ app.post('/transfers/external', authenticate, [
         });
       }
 
-      console.log('[External Transfer] Bank details retrieved:', JSON.stringify(bankDetails, null, 2));
-
-      // Prepare payload for B2B transaction - simplified like Brigita Bank
+      // Prepare payload for B2B transaction
       const payload = {
         accountFrom: fromAccount,
         accountTo: toAccount,
@@ -999,14 +986,9 @@ app.post('/transfers/external', authenticate, [
         explanation,
         senderName: req.user.full_name || 'User'
       };
-      console.log('[External Transfer] Prepared payload:', JSON.stringify(payload, null, 2));
 
       // Sign the payload with our private key
-      console.log('[External Transfer] Signing JWT...');
       const jwtToken = keyManager.sign(payload);
-      console.log('[External Transfer] JWT signed successfully');
-      
-      console.log(`[External Transfer] Sending transaction to ${bankDetails.transactionUrl}`);
       
       // Add retry logic for the external transfer
       const maxRetries = 3;
@@ -1015,28 +997,8 @@ app.post('/transfers/external', authenticate, [
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          console.log(`[External Transfer] Attempt ${attempt} of ${maxRetries}`);
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => {
-            console.log(`[External Transfer] Request timeout after 30 seconds on attempt ${attempt}`);
-            controller.abort();
-          }, 30000); // 30 second timeout
-
-          // Prepare the request body exactly as shown in the example
-          const requestBody = {
-            jwt: jwtToken
-          };
-          console.log('[External Transfer] Request body:', JSON.stringify(requestBody, null, 2));
-
-          console.log('[External Transfer] Sending request to destination bank...');
-          console.log('[External Transfer] Request details:', {
-            url: bankDetails.transactionUrl,
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            }
-          });
+          const timeoutId = setTimeout(() => controller.abort(), 30000);
 
           const response = await fetch(bankDetails.transactionUrl, {
             method: 'POST',
@@ -1044,24 +1006,16 @@ app.post('/transfers/external', authenticate, [
               'Content-Type': 'application/json',
               'Accept': 'application/json'
             },
-            body: JSON.stringify(requestBody),
-            signal: controller.signal,
-            timeout: 30000,
-            keepalive: true,
-            dnsTimeout: 5000,
-            connectTimeout: 5000
+            body: JSON.stringify({ jwt: jwtToken }),
+            signal: controller.signal
           });
 
           clearTimeout(timeoutId);
-          console.log(`[External Transfer] Response status: ${response.status}`);
-          console.log('[External Transfer] Response headers:', JSON.stringify(Object.fromEntries(response.headers.entries()), null, 2));
 
           if (!response.ok) {
             const errorText = await response.text();
-            console.error(`[External Transfer] Destination bank responded with error: ${response.status}`, errorText);
             
             if (response.status === 504 && attempt < maxRetries) {
-              console.log(`[External Transfer] Attempt ${attempt} failed with timeout, retrying in ${retryDelay/1000} seconds...`);
               await new Promise(resolve => setTimeout(resolve, retryDelay));
               continue;
             }
@@ -1070,7 +1024,6 @@ app.post('/transfers/external', authenticate, [
           }
 
           const result = await response.json();
-          console.log(`[External Transfer] Transaction successful:`, JSON.stringify(result, null, 2));
           
           // Update transaction with receiver name and status
           transaction.status = 'completed';
@@ -1079,63 +1032,41 @@ app.post('/transfers/external', authenticate, [
           }
 
           // Update source account balance
-          console.log(`[External Transfer] Updating source account balance: ${fromAccount} -${amount}`);
           dataStoreHelpers.updateAccountBalance(fromAccount, -amount);
 
-          // Format response data
-          const transactionData = {
-            id: transaction.id,
-            fromAccount: transaction.from_account,
-            toAccount: transaction.to_account,
-            amount: parseFloat(transaction.amount),
-            currency: transaction.currency,
-            explanation: transaction.explanation,
-            senderName: transaction.sender_name,
-            receiverName: transaction.receiver_name,
-            status: transaction.status,
-            createdAt: transaction.created_at,
-            isExternal: true
-          };
-
-          console.log('[External Transfer] Sending success response:', JSON.stringify(transactionData, null, 2));
           return res.status(201).json({
             status: 'success',
-            data: transactionData
+            data: {
+              id: transaction.id,
+              fromAccount: transaction.from_account,
+              toAccount: transaction.to_account,
+              amount: parseFloat(transaction.amount),
+              currency: transaction.currency,
+              explanation: transaction.explanation,
+              senderName: transaction.sender_name,
+              receiverName: transaction.receiver_name,
+              status: transaction.status,
+              createdAt: transaction.created_at,
+              isExternal: true
+            }
           });
 
         } catch (error) {
-          console.error(`[External Transfer] Error on attempt ${attempt}:`, error);
-          console.error(`[External Transfer] Error details:`, {
-            name: error.name,
-            message: error.message,
-            code: error.code,
-            stack: error.stack
-          });
           lastError = error;
           
-          // Handle different types of errors
-          if (error.name === 'AbortError' || error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
-            if (attempt < maxRetries) {
-              console.log(`[External Transfer] Attempt ${attempt} failed with timeout/connection error, retrying in ${retryDelay/1000} seconds...`);
-              await new Promise(resolve => setTimeout(resolve, retryDelay));
-              continue;
-            }
+          if ((error.name === 'AbortError' || error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') && attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            continue;
           }
           
           throw error;
         }
       }
 
-      // If we get here, all retries failed
-      console.error('[External Transfer] All retry attempts failed:', lastError);
       throw lastError;
 
     } catch (error) {
       // Transaction failed
-      console.error('[External Transfer] External transfer error:', error);
-      console.error('[External Transfer] Error stack:', error.stack);
-      
-      // Update transaction as failed with specific error message
       transaction.status = 'failed';
       let errorMessage = error.message;
       if (error.name === 'AbortError') {
@@ -1156,7 +1087,6 @@ app.post('/transfers/external', authenticate, [
     }
   } catch (error) {
     console.error('[External Transfer] Error creating external transaction:', error);
-    console.error('[External Transfer] Error stack:', error.stack);
     res.status(500).json({
       status: 'error',
       message: 'Error creating external transaction'
