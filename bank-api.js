@@ -27,6 +27,29 @@ const dataStore = {
   blacklistedTokens: new Set()
 };
 
+// Token blacklist file path
+const BLACKLIST_FILE = path.join(__dirname, 'token-blacklist.json');
+
+// Initialize blacklist from file or create new
+let blacklistedTokens = new Set();
+try {
+  if (fs.existsSync(BLACKLIST_FILE)) {
+    const data = fs.readFileSync(BLACKLIST_FILE, 'utf8');
+    blacklistedTokens = new Set(JSON.parse(data));
+  }
+} catch (error) {
+  console.error('Error loading token blacklist:', error);
+}
+
+// Function to save blacklist to file
+const saveBlacklist = () => {
+  try {
+    fs.writeFileSync(BLACKLIST_FILE, JSON.stringify([...blacklistedTokens]));
+  } catch (error) {
+    console.error('Error saving token blacklist:', error);
+  }
+};
+
 // Helper functions for data store
 const dataStoreHelpers = {
   // User helpers
@@ -167,7 +190,7 @@ const authenticate = async (req, res, next) => {
     }
 
     // Check if token is blacklisted
-    if (dataStore.blacklistedTokens.has(token)) {
+    if (blacklistedTokens.has(token)) {
       return res.status(401).json({ status: 'error', message: 'Token has been invalidated' });
     }
 
@@ -395,7 +418,8 @@ app.post('/sessions', [
 app.delete('/sessions', authenticate, (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (token) {
-    dataStore.blacklistedTokens.add(token);
+    blacklistedTokens.add(token);
+    saveBlacklist();
   }
   res.json({
     status: 'success',
