@@ -23,7 +23,8 @@ const dataStore = {
   transactions: [],
   nextUserId: 1,
   nextAccountId: 1,
-  nextTransactionId: 1
+  nextTransactionId: 1,
+  blacklistedTokens: new Set()
 };
 
 // Helper functions for data store
@@ -163,6 +164,11 @@ const authenticate = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
       return res.status(401).json({ status: 'error', message: 'No token provided' });
+    }
+
+    // Check if token is blacklisted
+    if (dataStore.blacklistedTokens.has(token)) {
+      return res.status(401).json({ status: 'error', message: 'Token has been invalidated' });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
@@ -387,6 +393,10 @@ app.post('/sessions', [
 });
 
 app.delete('/sessions', authenticate, (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (token) {
+    dataStore.blacklistedTokens.add(token);
+  }
   res.json({
     status: 'success',
     message: 'Successfully logged out'
