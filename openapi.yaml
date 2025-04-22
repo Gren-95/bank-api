@@ -488,7 +488,7 @@ paths:
                   example: string
                 toAccount:
                   type: string
-                  example: 61c8ef8e5c2a7c90fb67b5a502a34291ae5
+                  example: string
                 amount:
                   type: number
                   example: 150.00
@@ -561,7 +561,7 @@ paths:
               properties:
                 jwt:
                   type: string
-                  example: eyJhbGciOiJSUzI1NiIsImtpZCI6IjEiLCJ0eXAiOiJKV1QifQ...
+                  example: string
       responses:
         '200':
           description: Transaction processed successfully
