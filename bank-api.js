@@ -660,7 +660,7 @@ app.get('/transfers/:id', authenticate, async (req, res) => {
   }
 });
 
-app.get('/exchange-rates', (req, res) => {
+app.get('/exchange-rates', authenticate, (req, res) => {
   const { base, target } = req.query;
   const validCurrencies = ['EUR', 'USD', 'GBP', 'SEK'];
 
