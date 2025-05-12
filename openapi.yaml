@@ -33,7 +33,8 @@ components:
         balance:
           type: number
           format: float
-          description: Current account balance
+          description: Current account balance. New accounts are created with an initial balance of 1000.
+          example: 1000
         currency:
           type: string
           enum: [EUR, USD, GBP, SEK]
