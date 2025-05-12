@@ -24,10 +24,10 @@ components:
         id:
           type: integer
           description: Account ID
-        accountNumber:
+        account_number:
           type: string
           description: Unique account number with bank prefix
-        userId:
+        user_id:
           type: integer
           description: ID of the account owner
         balance:
@@ -41,13 +41,16 @@ components:
         name:
           type: string
           description: Account name/description
-        createdAt:
+        is_active:
+          type: boolean
+          description: Whether the account is active
+        created_at:
           type: string
           format: date-time
           description: Account creation date
       required:
-        - accountNumber
-        - userId
+        - account_number
+        - user_id
         - currency
         - name
     
@@ -380,7 +383,7 @@ paths:
                     $ref: '#/components/schemas/Account'
                   message:
                     type: string
-                    example: Account created successfully
+                    example: Account created successfully with initial balance of 1000
         '400':
           $ref: '#/components/responses/ValidationError'
         '401':
