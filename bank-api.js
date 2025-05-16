@@ -350,7 +350,7 @@ app.post('/users', [
 
     // Check if user exists
     if (dataStoreHelpers.findUserByUsername(username)) {
-      return res.status(400).json({
+      return res.status(409).json({
         status: 'error',
         message: 'Username already exists'
       });
@@ -381,6 +381,15 @@ app.post('/sessions', [
   body('password').isString()
 ], async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ 
+        status: 'error', 
+        message: 'Validation failed',
+        errors: errors.array() 
+      });
+    }
+
     const { username, password } = req.body;
     const user = dataStoreHelpers.findUserByUsername(username);
 
